@@ -5,6 +5,9 @@ const WINDOW_S = 300; // 그래프에 보이는 최근 구간(5분)
 const DB_MIN = -90;
 const DB_MAX = 0;
 
+import { showClip } from "./clip-player.js";
+
+let selectedId = null; // 클립 패널에 열려 있는 이벤트
 const levels = []; // {ts, db}
 const lines = []; // {ts, baseline, trigger}
 const events = new Map(); // id -> event
@@ -118,13 +121,18 @@ function renderList() {
     const li = document.createElement("li");
     const dur = ev.duration_s.toFixed(1);
     li.textContent = `${fmtTime(ev.start_ts)}  ${dur}초  최대 ${ev.peak_db.toFixed(1)} dB  (기준선 ${ev.baseline_db.toFixed(1)})`
-      + (ev.ongoing ? "  진행 중" : "") + (ev.truncated ? "  잘림" : "");
+      + (ev.ongoing ? "  진행 중" : "") + (ev.truncated ? "  잘림" : "")
+      + (ev.has_clip ? "  ▶ 클립" : ev.audio_deleted ? "  오디오 삭제됨" : "");
+    li.className = "clickable" + (ev.id === selectedId ? " selected" : "");
+    li.addEventListener("click", () => { selectedId = ev.id; showClip(ev); renderList(); });
     listEl.appendChild(li);
   }
 }
 
 function upsertEvent(ev) {
   events.set(ev.id, ev);
+  // 열어 둔 이벤트의 클립이 방금 저장됐으면 패널을 갱신한다
+  if (ev.id === selectedId && ev.has_clip) showClip(ev);
   renderList();
   queueDraw();
 }
@@ -140,7 +148,7 @@ export function handleMessage(msg) {
     trimOld(lines, msg.ts);
     const el = $("baseline-text");
     if (el) el.textContent = `기준선 ${msg.baseline_db.toFixed(1)} dB / 트리거 ${msg.trigger_db.toFixed(1)} dB / 하한 ${msg.floor_db.toFixed(1)} dB`;
-  } else if (msg.type === "event") {
+  } else if (msg.type === "event" || msg.type === "clip") {
     upsertEvent(msg.event);
   }
 }

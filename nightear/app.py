@@ -11,7 +11,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import events, gaps, ingest, realtime, settings, sleep
+from . import clips, events, gaps, ingest, realtime, settings, sleep
 from .clock import Clock, SystemClock
 from .detection import EventDetector
 from .frames import Frame, FramePipeline
@@ -62,6 +62,7 @@ def create_app(
     *,
     clock: Clock | None = None,
     db_path: str | Path | None = None,
+    clips_dir: str | Path | None = None,
     static_dir: Path | None = STATIC_DIR,
 ) -> FastAPI:
     db = Database(db_path or os.environ.get("NIGHTEAR_DB", "data/nightear.db"))
@@ -85,6 +86,8 @@ def create_app(
     app.state.gaps = gaps.GapStore(db)
     app.state.frames = FramePipeline()
     app.state.events = events.EventStore(db)
+    app.state.clips_dir = Path(clips_dir or os.environ.get("NIGHTEAR_CLIPS")
+                               or db.path.parent / "clips")
     app.state.sleep = SleepMode(app.state)
     lifecycle.add(app.state.sleep.start, app.state.sleep.stop)
 
@@ -92,6 +95,10 @@ def create_app(
         await app.state.hub.broadcast({"type": "event", "phase": kind, "event": event})
 
     app.state.events.subscribe(broadcast_event)
+    # 클립 레코더는 감지기보다 먼저 등록한다: 이벤트 시작 알림 시점에 그 프레임까지 링버퍼에 들어 있다.
+    app.state.clip_recorder = clips.ClipRecorder(
+        app.state.settings, app.state.events, app.state.hub, app.state.clips_dir)
+    app.state.frames.register(app.state.clip_recorder)
     # 감지기는 레벨 방송보다 먼저 등록한다: 레벨을 받았다면 그 프레임의 감지는 끝나 있다.
     app.state.frames.register(EventDetector(
         app.state.settings, app.state.events, app.state.hub,
@@ -115,6 +122,7 @@ def create_app(
     app.include_router(settings.router)
     app.include_router(gaps.router)
     app.include_router(events.router)
+    app.include_router(clips.router)
     app.include_router(sleep.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)

@@ -14,6 +14,7 @@ docker compose up --build
 같은 와이파이의 다른 기기에서 결과만 보려면 `NIGHTEAR_BIND=<PC의 LAN IP>`로 지정한다.)
 
 데이터(SQLite)는 `nightear-data` 볼륨의 `/data`에 저장된다. 로컬 개발 시에는 `NIGHTEAR_DB`(기본 `data/nightear.db`).
+클립(WAV)은 `NIGHTEAR_CLIPS`(기본: DB 옆 `clips/`, 컨테이너에서는 `/data/clips`)에 `event-<id>.wav` 로 저장된다.
 
 ## 개발 / 테스트
 

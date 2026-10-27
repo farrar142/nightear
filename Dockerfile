@@ -6,6 +6,7 @@ COPY nightear ./nightear
 RUN pip install --no-cache-dir .
 
 ENV NIGHTEAR_DB=/data/nightear.db
+ENV NIGHTEAR_CLIPS=/data/clips
 VOLUME /data
 EXPOSE 8000
 CMD ["uvicorn", "nightear.main:app", "--host", "0.0.0.0", "--port", "8000"]

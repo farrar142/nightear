@@ -10,6 +10,11 @@ def test_API_경로가_정적_파일에_가려지지_않는다(client):
     assert client.get("/capture-worklet.js").status_code == 200
 
 
+def test_클립_플레이어_스크립트가_서빙된다(client):
+    assert client.get("/clip-player.js").status_code == 200
+    assert "clip-panel" in client.get("/").text
+
+
 def test_그래프_스크립트가_서빙된다(client):
     assert client.get("/graph.js").status_code == 200
     assert "graph" in client.get("/").text

@@ -31,6 +31,10 @@ def _to_dict(row) -> dict[str, Any]:
         "truncated": bool(row["truncated"]),
         "sleep_mode": bool(row["sleep_mode"]),  # 이벤트 시작 시점에 수면 모드였는가
         "ongoing": not row["ended"],
+        "has_clip": bool(row["clip_path"]),
+        "clip_duration_s": row["clip_duration_s"] if row["clip_path"] else None,
+        "clip_start_ts": row["clip_start_ts"] if row["clip_path"] else None,
+        "audio_deleted": bool(row["audio_deleted"]),  # 보관 기간이 지나 오디오만 지워진 이벤트
     }
 
 
@@ -56,6 +60,15 @@ class EventStore:
     def get(self, event_id: int) -> dict[str, Any] | None:
         rows = self._db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
         return _to_dict(rows[0]) if rows else None
+
+    def set_clip(self, event_id: int, *, path: str, duration_s: float, start_ts: float) -> dict[str, Any]:
+        self._db.execute("UPDATE events SET clip_path = ?, clip_duration_s = ?, clip_start_ts = ? WHERE id = ?",
+                         (path, duration_s, start_ts, event_id))
+        return self.get(event_id)
+
+    def clear_clip(self, event_id: int) -> None:
+        """클립 파일이 지워졌음을 기록한다. 이벤트 메타데이터(시각·크기·라벨)는 남는다."""
+        self._db.execute("UPDATE events SET clip_path = NULL, audio_deleted = 1 WHERE id = ?", (event_id,))
 
     async def start(self, *, source_id: str, start_ts: float, end_ts: float,
                     peak_db: float, baseline_db: float,

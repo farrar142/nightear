@@ -24,7 +24,11 @@ SCHEMA_STATEMENTS: list[str] = [
         baseline_db REAL NOT NULL,
         truncated INTEGER NOT NULL DEFAULT 0,
         ended INTEGER NOT NULL DEFAULT 0,
-        sleep_mode INTEGER NOT NULL DEFAULT 0
+        sleep_mode INTEGER NOT NULL DEFAULT 0,
+        clip_path TEXT,
+        clip_duration_s REAL,
+        clip_start_ts REAL,
+        audio_deleted INTEGER NOT NULL DEFAULT 0
     )
     """,
 ]
@@ -32,6 +36,10 @@ SCHEMA_STATEMENTS: list[str] = [
 # (테이블, 컬럼, 정의): CREATE TABLE에 나중에 추가된 컬럼. 기존 DB에 ALTER로 보강한다.
 MIGRATIONS: list[tuple[str, str, str]] = [
     ("events", "sleep_mode", "INTEGER NOT NULL DEFAULT 0"),
+    ("events", "clip_path", "TEXT"),
+    ("events", "clip_duration_s", "REAL"),
+    ("events", "clip_start_ts", "REAL"),
+    ("events", "audio_deleted", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
