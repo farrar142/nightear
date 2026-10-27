@@ -1,0 +1,11 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY pyproject.toml ./
+COPY nightear ./nightear
+RUN pip install --no-cache-dir .
+
+ENV NIGHTEAR_DB=/data/nightear.db
+VOLUME /data
+EXPOSE 8000
+CMD ["uvicorn", "nightear.main:app", "--host", "0.0.0.0", "--port", "8000"]

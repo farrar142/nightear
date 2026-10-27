@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nightear</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; background: #12151c; color: #e6e9ef; margin: 0; padding: 24px; max-width: 640px; margin-inline: auto; }
+    h1 { font-size: 20px; margin: 0 0 16px; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    select, button { background: #1d2230; color: inherit; border: 1px solid #343b50; border-radius: 6px; padding: 8px 12px; font-size: 14px; }
+    button { cursor: pointer; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 13px; background: #343b50; }
+    .badge.ok { background: #1f6f43; }
+    .badge.bad { background: #8a2c2c; }
+    .meter { position: relative; height: 28px; background: #1d2230; border-radius: 6px; overflow: hidden; border: 1px solid #343b50; }
+    .meter-bar { height: 100%; width: 0; background: linear-gradient(90deg, #2e9e63, #d6b83a 70%, #d24a4a); transition: width 80ms linear; }
+    .meter-text { margin-top: 8px; font-variant-numeric: tabular-nums; color: #aab2c5; }
+    small { color: #7f8aa3; }
+  </style>
+</head>
+<body>
+  <h1>nightear</h1>
+
+  <div class="row">
+    <label for="device">입력 장치</label>
+    <select id="device"></select>
+    <button id="start" type="button">수집 시작</button>
+  </div>
+
+  <div class="row">
+    <span>수집 연결</span><span id="ingest-status" class="badge">대기</span>
+    <span>실시간 채널</span><span id="realtime-status" class="badge">대기</span>
+  </div>
+
+  <div class="meter"><div id="meter-bar" class="meter-bar"></div></div>
+  <div class="meter-text"><span id="meter-db">-- dBFS</span> <small>(-60 ~ 0 dBFS)</small></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

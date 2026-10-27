@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: .
+    ports:
+      # 내부망에서만 열리도록 한다. getUserMedia는 보안 컨텍스트가 필요하므로
+      # 같은 PC에서는 http://localhost:8000 으로 접속한다.
+      # 같은 와이파이의 다른 기기에서 결과를 보려면 NIGHTEAR_BIND를 PC의 LAN IP로 지정한다.
+      - "${NIGHTEAR_BIND:-127.0.0.1}:8000:8000"
+    volumes:
+      - nightear-data:/data
+    restart: unless-stopped
+
+volumes:
+  nightear-data:

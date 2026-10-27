@@ -1,0 +1,42 @@
+"""SQLite 저장소. 기능별 모듈이 자신의 스키마를 SCHEMA_STATEMENTS에 등록해 쓴다."""
+from __future__ import annotations
+
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Any, Iterable
+
+# 각 기능이 필요한 테이블을 여기에 CREATE TABLE IF NOT EXISTS 문으로 추가한다.
+SCHEMA_STATEMENTS: list[str] = [
+    """
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+    """,
+]
+
+
+class Database:
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        if str(path) != ":memory:":
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        with self._lock:
+            for stmt in SCHEMA_STATEMENTS:
+                self._conn.execute(stmt)
+            self._conn.commit()
+
+    def execute(self, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            cur = self._conn.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            self._conn.commit()
+            return rows
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
