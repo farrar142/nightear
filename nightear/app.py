@@ -7,8 +7,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, realtime, settings
+from . import events, ingest, realtime, settings
 from .clock import Clock, SystemClock
+from .detection import EventDetector
 from .frames import Frame, FramePipeline
 from .ingest import IngestState
 from .levels import FRAME_MS
@@ -33,6 +34,14 @@ def create_app(
     app.state.hub = RealtimeHub()
     app.state.ingest_state = IngestState()
     app.state.frames = FramePipeline()
+    app.state.events = events.EventStore(db)
+
+    async def broadcast_event(kind: str, event: dict) -> None:
+        await app.state.hub.broadcast({"type": "event", "phase": kind, "event": event})
+
+    app.state.events.subscribe(broadcast_event)
+    # 감지기는 레벨 방송보다 먼저 등록한다: 레벨을 받았다면 그 프레임의 감지는 끝나 있다.
+    app.state.frames.register(EventDetector(app.state.settings, app.state.events, app.state.hub))
 
     async def broadcast_level(frame: Frame) -> None:
         await app.state.hub.broadcast({
@@ -50,6 +59,7 @@ def create_app(
         return app.state.ingest_state.snapshot()
 
     app.include_router(settings.router)
+    app.include_router(events.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)
 

@@ -16,7 +16,7 @@ DEFAULTS: dict[str, Any] = {
     "night_start_hour": 22,
     "night_end_hour": 12,
     "idle_threshold_minutes": 20,
-    "baseline_window_minutes": 5,
+    "baseline_window_minutes": 5.0,
     "trigger_margin_db": 10.0,
     "trigger_min_duration_s": 0.2,
     "absolute_floor_db": -60.0,
