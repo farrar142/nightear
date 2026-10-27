@@ -14,6 +14,18 @@ SCHEMA_STATEMENTS: list[str] = [
         value TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_id TEXT NOT NULL,
+        start_ts REAL NOT NULL,
+        end_ts REAL NOT NULL,
+        peak_db REAL NOT NULL,
+        baseline_db REAL NOT NULL,
+        truncated INTEGER NOT NULL DEFAULT 0,
+        ended INTEGER NOT NULL DEFAULT 0
+    )
+    """,
 ]
 
 

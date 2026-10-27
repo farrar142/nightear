@@ -1,7 +1,9 @@
 // 브라우저 수집 소스 + 실시간 레벨 미터.
 // 마이크(원음) -> AudioWorklet(16kHz mono 16-bit PCM, 100ms) -> /ws/ingest, 레벨은 /ws/realtime 로 받는다.
 
-const DEVICE_KEY = "nightear.deviceId";
+import { handleMessage as handleGraphMessage, initGraph } from "./graph.js";
+
+const DEVICE_KEY ="nightear.deviceId";
 // IdleDetector 연동은 수면 모드 티켓에서 붙인다. 그 전까지는 미지원으로 알린다.
 const IDLE_DETECTION_SUPPORTED = false;
 
@@ -176,6 +178,7 @@ function connectRealtime() {
       const el = $("active-source");
       if (el) el.textContent = msg.active_source_id || "없음";
     }
+    handleGraphMessage(msg);
   };
   ws.onclose = () => {
     setBadge($("realtime-status"), "끊김", "bad");
@@ -190,5 +193,6 @@ $("device").addEventListener("change", () => {
 });
 $("start").addEventListener("click", startCapture);
 
+initGraph();
 connectRealtime();
 refreshDevices().catch(() => {});
