@@ -13,3 +13,9 @@ def test_API_경로가_정적_파일에_가려지지_않는다(client):
 def test_그래프_스크립트가_서빙된다(client):
     assert client.get("/graph.js").status_code == 200
     assert "graph" in client.get("/").text
+
+
+def test_타임라인_스크립트가_서빙되고_연결된다(client):
+    assert client.get("/timeline.js").status_code == 200
+    assert "timeline.js" in client.get("/app.js").text
+    assert "tl-canvas" in client.get("/").text

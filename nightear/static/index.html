@@ -58,6 +58,24 @@
   </div>
   <ul id="event-list" class="events"></ul>
 
+  <section id="timeline">
+    <div class="row" style="margin-top:28px">
+      <h2 style="font-size:16px;margin:0">밤 타임라인</h2>
+      <button id="tl-refresh" type="button">새로고침</button>
+    </div>
+    <ul id="tl-night-list" class="events"></ul>
+    <div id="tl-detail" hidden>
+      <div class="meter-text" id="tl-title"></div>
+      <canvas id="tl-canvas" class="graph"></canvas>
+      <div class="meter-text"><small>연한 녹색 초당 최대 / 진한 녹색 초당 평균 / 파란 띠 수면 모드 / 회색 띠 수집 공백 / 빨강 점 이벤트(클릭)</small></div>
+      <ul id="tl-events" class="events"></ul>
+    </div>
+  </section>
+  <style>
+    #tl-night-list li.clickable, #tl-events li.clickable { cursor: pointer; }
+    #tl-events li.selected { background: #2b2f1d; }
+  </style>
+
   <script src="app.js" type="module"></script>
 </body>
 </html>

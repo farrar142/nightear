@@ -267,3 +267,7 @@ initGraph();
 connectRealtime();
 startIdleDetector(false); // 이미 권한이 허용돼 있으면 사용자 제스처 없이도 켠다
 refreshDevices().catch(() => {});
+
+// 밤 타임라인 화면(별도 모듈)
+import { initTimeline } from "./timeline.js";
+initTimeline();

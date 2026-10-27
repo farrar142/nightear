@@ -64,6 +64,12 @@ class Database:
             self._conn.commit()
             return rows
 
+    def executemany(self, sql: str, rows: Iterable[Iterable[Any]]) -> None:
+        """여러 행을 한 트랜잭션으로 쓴다."""
+        with self._lock:
+            self._conn.executemany(sql, [tuple(r) for r in rows])
+            self._conn.commit()
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

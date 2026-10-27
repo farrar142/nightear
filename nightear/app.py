@@ -11,7 +11,8 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import events, gaps, ingest, realtime, settings, sleep
+from . import events, gaps, ingest, nights, realtime, settings, sleep
+from .history import LevelHistory
 from .clock import Clock, SystemClock
 from .detection import EventDetector
 from .frames import Frame, FramePipeline
@@ -86,6 +87,10 @@ def create_app(
     app.state.frames = FramePipeline()
     app.state.events = events.EventStore(db)
     app.state.sleep = SleepMode(app.state)
+    app.state.history = LevelHistory(db)  # 1초 해상도 레벨 기록(밤 타임라인용)
+    app.state.frames.register(app.state.history)
+    lifecycle.add(stop=app.state.history.flush_all)
+    app.state.nights = nights.NightService(app.state, app.state.history)
     lifecycle.add(app.state.sleep.start, app.state.sleep.stop)
 
     async def broadcast_event(kind: str, event: dict) -> None:
@@ -116,6 +121,7 @@ def create_app(
     app.include_router(gaps.router)
     app.include_router(events.router)
     app.include_router(sleep.router)
+    app.include_router(nights.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)
 
