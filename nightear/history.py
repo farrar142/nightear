@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from typing import Any
 
 from . import storage
@@ -35,6 +36,8 @@ class LevelHistory:
 
     def __init__(self, db: Any) -> None:
         self._db = db
+        # 프레임 처리기(이벤트 루프)와 조회(스레드풀의 동기 엔드포인트)가 같은 상태를 만지므로 락으로 보호한다.
+        self._lock = threading.RLock()
         self._pending: dict[int, tuple[float, float]] = {}  # 완성된 초: ts -> (max, mean)
         self._cur: int | None = None
         self._max = 0.0
@@ -42,6 +45,10 @@ class LevelHistory:
         self._n = 0
 
     def __call__(self, frame: Frame) -> None:
+        with self._lock:
+            self._add(frame)
+
+    def _add(self, frame: Frame) -> None:
         sec = math.floor(frame.ts)
         if sec != self._cur:
             self._close_bucket()
@@ -54,8 +61,9 @@ class LevelHistory:
             self._pending = {}
 
     def source_lost(self) -> None:
-        self._close_bucket()
-        self.flush()
+        with self._lock:
+            self._close_bucket()
+            self.flush()
 
     def _close_bucket(self) -> None:
         if self._cur is not None and self._n:
@@ -71,16 +79,18 @@ class LevelHistory:
 
     def flush(self) -> None:
         """완성된 초를 모두 쓴다(진행 중인 초는 제외)."""
-        self._write(self._pending)
-        self._pending = {}
+        with self._lock:
+            self._write(self._pending)
+            self._pending = {}
 
     def flush_all(self) -> None:
         """진행 중인 초의 현재 집계까지 쓴다. 이후 프레임이 오면 같은 키를 덮어쓴다."""
-        rows = dict(self._pending)
-        if self._cur is not None and self._n:
-            rows[self._cur] = (self._max, self._sum / self._n)
-        self._write(rows)
-        self._pending = {}
+        with self._lock:
+            rows = dict(self._pending)
+            if self._cur is not None and self._n:
+                rows[self._cur] = (self._max, self._sum / self._n)
+            self._write(rows)
+            self._pending = {}
 
     def range(self, start_ts: float, end_ts: float) -> list[tuple[int, float, float]]:
         """[start_ts, end_ts) 의 (ts, max_db, mean_db) 목록(시간순)."""
@@ -90,7 +100,15 @@ class LevelHistory:
             (math.ceil(start_ts), math.ceil(end_ts)))
         return [(r["ts"], r["max_db"], r["mean_db"]) for r in rows]
 
-    def hours_with_data(self) -> list[int]:
-        """데이터가 있는 epoch 시(=ts//3600) 목록. 밤 목록 후보 계산용."""
+    def summary(self, start_ts: float, end_ts: float) -> tuple[int, float | None]:
+        """[start_ts, end_ts) 의 (기록된 초 수, 최대 max_db). 행을 가져오지 않고 SQL 집계만 쓴다."""
         self.flush_all()
-        return [r["h"] for r in self._db.execute("SELECT DISTINCT ts / 3600 AS h FROM level_history ORDER BY h")]
+        r = self._db.execute(
+            "SELECT COUNT(*) AS n, MAX(max_db) AS m FROM level_history WHERE ts >= ? AND ts < ?",
+            (math.ceil(start_ts), math.ceil(end_ts)))[0]
+        return r["n"], r["m"]
+
+    def days_with_data(self) -> list[int]:
+        """데이터가 있는 epoch 일(=ts//86400, UTC) 목록. 밤 목록 후보 계산용(PK 인덱스 스캔)."""
+        self.flush_all()
+        return [r["d"] for r in self._db.execute("SELECT DISTINCT ts / 86400 AS d FROM level_history")]

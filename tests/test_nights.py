@@ -118,3 +118,39 @@ def test_밤_목록은_데이터_있는_밤만_최신순(client, clock):
 def test_잘못된_밤_id는_404(client):
     assert client.get("/api/nights/abc").status_code == 404
     assert client.get("/api/nights/2025-13-45").status_code == 404
+
+
+def test_프레임_처리와_조회가_동시에_일어나도_초가_유실되지_않는다(client):
+    """스레드풀의 조회(flush_all)와 이벤트 루프의 프레임 처리가 LevelHistory 상태를 경쟁하지 않는다."""
+    import threading
+    from nightear.frames import Frame
+
+    hist = client.app.state.history
+    base = ts(2025, 1, 15, 23)
+    stop = threading.Event()
+    errors = []
+
+    def reader():
+        try:
+            while not stop.is_set():
+                hist.range(base, base + 4000)
+                hist.summary(base, base + 4000)
+        except Exception as e:  # pragma: no cover
+            errors.append(e)
+
+    t = threading.Thread(target=reader)
+    t.start()
+    for i in range(3000):  # 300초 분량 프레임
+        hist(Frame("s", base + i * 0.1, -40.0, b""))
+    stop.set()
+    t.join()
+    assert not errors
+    assert hist.summary(base, base + 4000)[0] == 300
+
+
+def test_밤_목록_요약은_상세와_일치한다(client):
+    with ingest(client) as src:
+        src.send_pcm(audio.tone(-40, 2.0) + audio.tone(-10, 1.0))
+    listed = client.get("/api/nights").json()["nights"][0]["summary"]
+    detail = client.get("/api/nights/2025-01-15").json()["summary"]
+    assert listed == detail

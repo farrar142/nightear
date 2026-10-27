@@ -72,8 +72,7 @@ class NightService:
     def _cfg(self) -> dict[str, Any]:
         return self._s.settings.get_all()
 
-    def _build(self, night_id: str, cfg: dict[str, Any], *, with_levels: bool) -> dict[str, Any]:
-        w0, w1 = night_window(night_id, cfg)
+    def _intervals(self, w0: float, w1: float) -> tuple[list[dict], list[dict]]:
         # 진행 중인 구간의 끝은 "지금"(창이 아직 안 끝났다면)으로 잘라 길이를 센다.
         live_end = min(w1, max(self._now(), w0))
         sleep = []
@@ -86,29 +85,39 @@ class NightService:
             ov = _overlap(g["start_ts"], g["end_ts"], w0, live_end)
             if ov:
                 gaps.append({"start_ts": ov[0], "end_ts": ov[1], "ongoing": g["ongoing"]})
-        events = self._s.events.list(sort="time", order="asc", since=w0, until=w1)
-        level_rows = self._history.range(w0, w1)
-        summary = {
-            "level_seconds": len(level_rows),
-            "event_count": len(events),
+        return sleep, gaps
+
+    def _summary(self, w0: float, w1: float, sleep: list[dict], gaps: list[dict],
+                 level_seconds: int, peak_db: float | None, event_count: int) -> dict[str, Any]:
+        return {
+            "level_seconds": level_seconds,
+            "event_count": event_count,
             "sleep_seconds": sum(x["end_ts"] - x["start_ts"] for x in sleep),
             "gap_count": len(gaps),
             "gap_seconds": sum(x["end_ts"] - x["start_ts"] for x in gaps),
-            "peak_db": max((r[1] for r in level_rows), default=None),
+            "peak_db": peak_db,
         }
-        out: dict[str, Any] = {
-            "id": night_id, "start_ts": w0, "end_ts": w1, "summary": summary,
-            "sleep_intervals": sleep, "gaps": gaps, "events": events,
-        }
-        if with_levels:
-            out["levels"] = {"columns": ["ts", "max_db", "mean_db"], "step_s": 1,
-                             "rows": [list(r) for r in level_rows]}
-        return out
+
+    def _event_count(self, w0: float, w1: float) -> int:
+        return self._s.db.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE start_ts >= ? AND start_ts < ?", (w0, w1))[0]["n"]
 
     def detail(self, night_id: str) -> dict[str, Any]:
-        return self._build(night_id, self._cfg(), with_levels=True)
+        w0, w1 = night_window(night_id, self._cfg())
+        sleep, gaps = self._intervals(w0, w1)
+        events = self._s.events.list(sort="time", order="asc", since=w0, until=w1)
+        level_rows = self._history.range(w0, w1)
+        summary = self._summary(w0, w1, sleep, gaps, len(level_rows),
+                                max((r[1] for r in level_rows), default=None), len(events))
+        return {
+            "id": night_id, "start_ts": w0, "end_ts": w1, "summary": summary,
+            "sleep_intervals": sleep, "gaps": gaps, "events": events,
+            "levels": {"columns": ["ts", "max_db", "mean_db"], "step_s": 1,
+                       "rows": [list(r) for r in level_rows]},
+        }
 
     def _candidate_ids(self, cfg: dict[str, Any]) -> set[str]:
+        """데이터가 있을 수 있는 밤 id. 레벨·이벤트는 UTC 일 단위 DISTINCT 로 싸게 모은다."""
         tz = ZoneInfo(cfg["timezone"])
         now = self._now()
 
@@ -116,16 +125,18 @@ class NightService:
             return datetime.fromtimestamp(ts, tz).date()
 
         days: set[date] = set()
+        utc_days = set(self._history.days_with_data())
+        utc_days.update(r["d"] for r in self._s.db.execute(
+            "SELECT DISTINCT CAST(start_ts / 86400 AS INTEGER) AS d FROM events"))
+        for d in utc_days:  # 한 UTC 일은 로컬 날짜 둘에 걸칠 수 있다
+            days.add(day_of(d * 86400))
+            days.add(day_of(d * 86400 + 86399))
 
         def add_span(a: float, b: float | None) -> None:
             d0, d1 = day_of(a), day_of(b if b is not None else now)
             n = min((d1 - d0).days, MAX_SPAN_DAYS)
             days.update(d0 + timedelta(days=i) for i in range(max(n, 0) + 1))
 
-        for h in self._history.hours_with_data():
-            days.add(day_of(h * 3600))
-        for r in self._s.db.execute("SELECT start_ts FROM events"):
-            days.add(day_of(r["start_ts"]))
         for s, e in self._s.sleep.intervals():
             add_span(s, e)
         for g in self._s.gaps.query():
@@ -134,13 +145,17 @@ class NightService:
         return {d.isoformat() for day in days for d in (day, day - timedelta(days=1))}
 
     def list(self) -> list[dict[str, Any]]:
+        """밤 목록. 요약은 SQL 집계로만 구해 레벨/이벤트 행을 읽지 않는다."""
         cfg = self._cfg()
         nights = []
         for nid in self._candidate_ids(cfg):
-            n = self._build(nid, cfg, with_levels=False)
-            s = n["summary"]
-            if s["level_seconds"] or s["event_count"] or s["sleep_seconds"] or s["gap_count"]:
-                nights.append({k: n[k] for k in ("id", "start_ts", "end_ts", "summary")})
+            w0, w1 = night_window(nid, cfg)
+            sleep, gaps = self._intervals(w0, w1)
+            n_levels, peak = self._history.summary(w0, w1)
+            n_events = self._event_count(w0, w1)
+            if n_levels or n_events or sleep or gaps:
+                nights.append({"id": nid, "start_ts": w0, "end_ts": w1,
+                               "summary": self._summary(w0, w1, sleep, gaps, n_levels, peak, n_events)})
         nights.sort(key=lambda n: n["id"], reverse=True)
         return nights
 
