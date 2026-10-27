@@ -13,47 +13,66 @@ def role(session) -> str:
     return msg["role"]
 
 
-def test_first_connection_is_active_second_is_secondary(client):
+def test_newest_connection_is_active_and_previous_is_demoted(client):
     with ingest(client, "a") as a:
         assert role(a) == "active"
         with ingest(client, "b") as b:
-            assert role(b) == "secondary"
-            assert client.get("/api/status").json()["active_source_id"] == "a"
+            assert role(b) == "active"
+            assert role(a) == "secondary"  # 이전 active는 강등 통지를 받는다
+            assert client.get("/api/status").json()["active_source_id"] == "b"
 
 
-def test_secondary_frames_are_not_ingested(client):
+def test_demoted_frames_are_not_ingested(client):
     with realtime(client) as rt:
         with ingest(client, "a") as a, ingest(client, "b") as b:
-            role(a), role(b)
-            b.send_pcm(audio.tone(-20, 0.5))
-            a.send_pcm(audio.tone(-40, 0.3))
+            role(a), role(a), role(b)
+            a.send_pcm(audio.tone(-20, 0.5))
+            b.send_pcm(audio.tone(-40, 0.3))
             levels = rt.receive_levels(3)
-    assert {m["source_id"] for m in levels} == {"a"}
+    assert {m["source_id"] for m in levels} == {"b"}
     assert all(abs(m["db"] + 40) < 0.5 for m in levels)
 
 
-def test_secondary_is_promoted_when_active_leaves(client):
+def test_most_recent_remaining_is_promoted_when_active_leaves(client):
     with ingest(client, "a") as a:
-        role(a)
         with ingest(client, "b") as b:
-            role(b)
             with ingest(client, "c") as c:
-                role(c)
-                a.ws.close()
-                # 가장 최근에 붙은 secondary(c)가 승격된다
-                assert role(c) == "active"
+                role(a), role(a), role(b), role(b), role(c)
+                c.ws.close()
+                assert role(b) == "active"  # 남은 연결 중 가장 최근
                 with realtime(client) as rt:
-                    c.send_pcm(audio.tone(-30, 0.2))
+                    b.send_pcm(audio.tone(-30, 0.2))
                     levels = rt.receive_levels(2)
-                assert {m["source_id"] for m in levels} == {"c"}
+                assert {m["source_id"] for m in levels} == {"b"}
 
 
-def test_no_gap_when_promotion_happens(client):
+def test_no_gap_on_demotion_or_promotion(client):
     with ingest(client, "a") as a, ingest(client, "b") as b:
-        role(a), role(b)
-        a.ws.close()
-        assert role(b) == "active"
+        role(a), role(a), role(b)
         assert client.get("/api/gaps").json()["gaps"] == []
+        b.ws.close()
+        assert role(a) == "active"
+        assert client.get("/api/gaps").json()["gaps"] == []
+
+
+def test_dead_promotion_target_is_skipped_and_gap_opens(client, clock):
+    st = client.app.state.ingest_state
+    with ingest(client, "a") as a, ingest(client, "b") as b:
+        role(a), role(a), role(b)
+        a_id = next(i for i, s in st.connections.items() if s == "a")
+
+        async def dead(_):
+            raise RuntimeError("closed")
+
+        st.sockets[a_id].send_json = dead  # a는 이미 죽은 연결
+        b.ws.close()
+        gaps = None
+        for _ in range(500):
+            gaps = client.get("/api/gaps").json()["gaps"]
+            if gaps:
+                break
+        assert gaps and gaps[0]["ongoing"] is True
+        assert client.get("/api/status").json()["source_connected"] is False
 
 
 def test_active_disconnect_records_gap_and_reconnect_closes_it(client, clock):

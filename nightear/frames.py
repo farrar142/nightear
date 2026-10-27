@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
@@ -19,6 +20,7 @@ class Frame:
     pcm: bytes  # 16kHz 모노 s16le, FRAME_MS 길이
 
 
+log = logging.getLogger(__name__)
 FrameProcessor = Callable[[Frame], Awaitable[None] | None]
 
 
@@ -31,9 +33,25 @@ class FramePipeline:
 
     async def dispatch(self, frame: Frame) -> None:
         for p in self._processors:
-            result: Any = p(frame)
-            if inspect.isawaitable(result):
-                await result
+            try:  # 처리기 하나의 예외가 수집·다른 처리기를 막지 않게 격리한다
+                result: Any = p(frame)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                log.exception("프레임 처리기 오류(무시하고 계속): %r", p)
+
+    async def source_lost(self) -> None:
+        """활성 소스가 사라졌다(프레임이 더 오지 않는다). `source_lost` 메서드를 가진 처리기에 알린다."""
+        for p in self._processors:
+            hook = getattr(p, "source_lost", None)
+            if hook is None:
+                continue
+            try:
+                result = hook()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                log.exception("source_lost 처리기 오류(무시하고 계속): %r", p)
 
 
 class FrameClock:

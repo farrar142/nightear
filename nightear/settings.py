@@ -83,13 +83,19 @@ def _check(key: str, value: Any) -> Any:
 class SettingsStore:
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._cache: dict[str, Any] | None = None  # 프레임마다 읽히므로 메모리에 캐시하고 update 때 갱신한다
 
-    def get_all(self) -> dict[str, Any]:
+    def _load(self) -> dict[str, Any]:
         result = dict(DEFAULTS)
         for row in self._db.execute("SELECT key, value FROM settings"):
             if row["key"] in DEFAULTS:
                 result[row["key"]] = json.loads(row["value"])
         return result
+
+    def get_all(self) -> dict[str, Any]:
+        if self._cache is None:
+            self._cache = self._load()
+        return dict(self._cache)
 
     def get(self, key: str) -> Any:
         return self.get_all()[key]
@@ -102,6 +108,7 @@ class SettingsStore:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (k, json.dumps(v)),
             )
+        self._cache = self._load()
         return self.get_all()
 
 

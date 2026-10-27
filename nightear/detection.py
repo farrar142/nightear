@@ -51,10 +51,11 @@ class BaselineWindow:
 
 
 class EventDetector:
-    def __init__(self, settings, store, hub) -> None:
+    def __init__(self, settings, store, hub, sleep_mode=None) -> None:
         self._settings = settings
         self._store = store
         self._hub = hub
+        self._sleep_mode = sleep_mode or (lambda: False)  # 이벤트 시작 시점의 수면 모드 여부
         self._reset(None)
 
     def _reset(self, source_id: str | None) -> None:
@@ -68,9 +69,22 @@ class EventDetector:
         self._run_joined = False
         self._event: dict[str, Any] | None = None  # 진행 중인 이벤트(메모리 상태)
 
+    async def finish_in_progress(self) -> None:
+        """진행 중인 이벤트를 마지막으로 본 끝 시각으로 종료한다(구독자는 항상 "ended"를 받는다)."""
+        ev = self._event
+        self._event = None
+        self._run_n = 0
+        if ev is not None:
+            await self._store.finish(ev["id"], end_ts=ev["end"], peak_db=ev["peak"])
+
+    async def source_lost(self) -> None:
+        """활성 소스가 사라져 프레임이 끊겼다."""
+        await self.finish_in_progress()
+
     async def __call__(self, frame: Frame) -> None:
         cfg = self._settings.get_all()
         if frame.source_id != self._source_id:
+            await self.finish_in_progress()
             self._reset(frame.source_id)
         ts, db = frame.ts, frame.db
         margin = cfg["trigger_margin_db"]
@@ -110,7 +124,8 @@ class EventDetector:
             if qualified:
                 created = await self._store.start(
                     source_id=frame.source_id, start_ts=self._run_start, end_ts=frame_end,
-                    peak_db=self._run_peak, baseline_db=self._run_baseline)
+                    peak_db=self._run_peak, baseline_db=self._run_baseline,
+                    sleep_mode=bool(self._sleep_mode()))
                 self._event = {"id": created["id"], "start": self._run_start,
                                "end": frame_end, "peak": self._run_peak}
                 self._run_joined = True

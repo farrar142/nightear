@@ -8,12 +8,14 @@ listener는 `listener(kind: str, event: dict)` 형태의 동기/비동기 callab
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import Any, Callable, Literal
 
 from fastapi import APIRouter, Query, Request
 
 from .storage import Database
 
+log = logging.getLogger(__name__)
 EventListener = Callable[[str, dict[str, Any]], Any]
 
 
@@ -27,6 +29,7 @@ def _to_dict(row) -> dict[str, Any]:
         "peak_db": row["peak_db"],
         "baseline_db": row["baseline_db"],
         "truncated": bool(row["truncated"]),
+        "sleep_mode": bool(row["sleep_mode"]),  # 이벤트 시작 시점에 수면 모드였는가
         "ongoing": not row["ended"],
     }
 
@@ -43,20 +46,24 @@ class EventStore:
 
     async def _notify(self, kind: str, event: dict[str, Any]) -> None:
         for listener in self._listeners:
-            result = listener(kind, event)
-            if inspect.isawaitable(result):
-                await result
+            try:  # 구독자 하나의 예외가 감지·수집을 막지 않게 격리한다
+                result = listener(kind, event)
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                log.exception("이벤트 구독자 오류(무시하고 계속): %r", listener)
 
     def get(self, event_id: int) -> dict[str, Any] | None:
         rows = self._db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
         return _to_dict(rows[0]) if rows else None
 
     async def start(self, *, source_id: str, start_ts: float, end_ts: float,
-                    peak_db: float, baseline_db: float) -> dict[str, Any]:
+                    peak_db: float, baseline_db: float,
+                    sleep_mode: bool = False) -> dict[str, Any]:
         rows = self._db.execute(
-            "INSERT INTO events(source_id, start_ts, end_ts, peak_db, baseline_db) "
-            "VALUES(?, ?, ?, ?, ?) RETURNING id",
-            (source_id, start_ts, end_ts, peak_db, baseline_db),
+            "INSERT INTO events(source_id, start_ts, end_ts, peak_db, baseline_db, sleep_mode) "
+            "VALUES(?, ?, ?, ?, ?, ?) RETURNING id",
+            (source_id, start_ts, end_ts, peak_db, baseline_db, int(sleep_mode)),
         )
         event = self.get(rows[0]["id"])
         await self._notify("started", event)

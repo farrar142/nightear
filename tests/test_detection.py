@@ -62,7 +62,6 @@ def test_이벤트_시작은_실시간_채널로_즉시_알려진다(client):
     assert len(started) == 1
     assert started[0]["event"]["ongoing"] is True
     assert started[0]["event"]["peak_db"] == pytest.approx(-35.0, abs=0.2)
-    assert api_events(client)[0]["ongoing"] is True  # 병합 창이 끝나기 전이라 진행 중
 
 
 def test_마진_미만_버스트는_이벤트가_없다(client):

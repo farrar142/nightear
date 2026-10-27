@@ -23,9 +23,15 @@ SCHEMA_STATEMENTS: list[str] = [
         peak_db REAL NOT NULL,
         baseline_db REAL NOT NULL,
         truncated INTEGER NOT NULL DEFAULT 0,
-        ended INTEGER NOT NULL DEFAULT 0
+        ended INTEGER NOT NULL DEFAULT 0,
+        sleep_mode INTEGER NOT NULL DEFAULT 0
     )
     """,
+]
+
+# (테이블, 컬럼, 정의): CREATE TABLE에 나중에 추가된 컬럼. 기존 DB에 ALTER로 보강한다.
+MIGRATIONS: list[tuple[str, str, str]] = [
+    ("events", "sleep_mode", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -41,6 +47,15 @@ class Database:
             for stmt in SCHEMA_STATEMENTS:
                 self._conn.execute(stmt)
             self._conn.commit()
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """이미 만들어진 DB에 뒤늦게 추가된 컬럼을 보강한다."""
+        for table, column, ddl in MIGRATIONS:
+            cols = {r["name"] for r in self._conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        self._conn.commit()
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
         with self._lock:
