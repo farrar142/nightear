@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from nightear.app import create_app
 
+from .support.classifier import FakeClassifier
 from .support.clock import FakeClock
 
 
@@ -24,7 +25,8 @@ def make_app(clock, db_path):
     """같은 DB 파일을 재사용하며 앱(=백엔드 재시작)을 새로 만드는 팩토리."""
 
     def _make(**overrides):
-        kwargs = {"clock": clock, "db_path": db_path}
+        # 기본 분류기는 가짜: 실제 YAMNet 은 스모크 테스트에서만 쓴다.
+        kwargs = {"clock": clock, "db_path": db_path, "classifier": FakeClassifier()}
         kwargs.update(overrides)
         return create_app(**kwargs)
 

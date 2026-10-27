@@ -26,6 +26,19 @@ py -m pytest tests/test_settings.py   # 한 파일만
 
 로컬 실행: `py -m uvicorn nightear.main:app --reload`
 
+### 로컬 AI 라벨링 (YAMNet)
+
+클립 라벨링은 YAMNet(AudioSet 521 클래스)을 onnxruntime으로 PC 안에서만 돌린다. Docker 이미지는 빌드 때
+모델을 내려받아 둔다. 로컬 개발에서는:
+
+```
+py -m pip install -e ".[ml]"
+py scripts/fetch_models.py      # ./models (NIGHTEAR_MODELS) 에 yamnet.onnx, yamnet_class_map.csv
+```
+
+모델이 없으면 라벨 상태가 failed 가 될 뿐 클립은 그대로 남는다. 실제 모델 스모크 테스트
+(`tests/test_yamnet_smoke.py`)는 모델이 없으면 건너뛴다.
+
 ### 테스트 구조
 
 테스트의 seam은 백엔드 입구(수집 WebSocket `/ws/ingest`)다. hello + 합성 PCM + 활동 메시지를 흘려보내고,

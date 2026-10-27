@@ -11,7 +11,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import clips, events, gaps, ingest, realtime, settings, sleep
+from . import clips, events, labeling, gaps, ingest, realtime, settings, sleep
 from .clock import Clock, SystemClock
 from .detection import EventDetector
 from .frames import Frame, FramePipeline
@@ -63,6 +63,7 @@ def create_app(
     clock: Clock | None = None,
     db_path: str | Path | None = None,
     clips_dir: str | Path | None = None,
+    classifier: labeling.SoundClassifier | None = None,
     static_dir: Path | None = STATIC_DIR,
 ) -> FastAPI:
     db = Database(db_path or os.environ.get("NIGHTEAR_DB", "data/nightear.db"))
@@ -99,6 +100,12 @@ def create_app(
     app.state.clip_recorder = clips.ClipRecorder(
         app.state.settings, app.state.events, app.state.hub, app.state.clips_dir)
     app.state.frames.register(app.state.clip_recorder)
+    # 소리 분류기 포트: 기본은 로컬 YAMNet(오디오가 PC 밖으로 나가지 않는다). 테스트는 가짜를 주입한다.
+    app.state.classifier = classifier or labeling.YamnetClassifier()
+    app.state.label_worker = labeling.LabelWorker(
+        app.state.settings, app.state.events, app.state.hub, app.state.classifier, app.state.clips_dir)
+    app.state.clip_recorder.on_clip_saved(app.state.label_worker.enqueue)
+    lifecycle.add(app.state.label_worker.start, app.state.label_worker.stop)
     # 감지기는 레벨 방송보다 먼저 등록한다: 레벨을 받았다면 그 프레임의 감지는 끝나 있다.
     app.state.frames.register(EventDetector(
         app.state.settings, app.state.events, app.state.hub,
@@ -123,6 +130,7 @@ def create_app(
     app.include_router(gaps.router)
     app.include_router(events.router)
     app.include_router(clips.router)
+    app.include_router(labeling.router)
     app.include_router(sleep.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)

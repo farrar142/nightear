@@ -28,9 +28,20 @@ SCHEMA_STATEMENTS: list[str] = [
         clip_path TEXT,
         clip_duration_s REAL,
         clip_start_ts REAL,
-        audio_deleted INTEGER NOT NULL DEFAULT 0
+        audio_deleted INTEGER NOT NULL DEFAULT 0,
+        label_status TEXT
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS event_labels (
+        event_id INTEGER NOT NULL,
+        rank INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        score REAL NOT NULL,
+        PRIMARY KEY (event_id, rank)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_event_labels_label ON event_labels(label)",
 ]
 
 # (테이블, 컬럼, 정의): CREATE TABLE에 나중에 추가된 컬럼. 기존 DB에 ALTER로 보강한다.
@@ -40,6 +51,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("events", "clip_duration_s", "REAL"),
     ("events", "clip_start_ts", "REAL"),
     ("events", "audio_deleted", "INTEGER NOT NULL DEFAULT 0"),
+    ("events", "label_status", "TEXT"),
 ]
 
 

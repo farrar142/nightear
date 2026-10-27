@@ -25,6 +25,7 @@ DEFAULTS: dict[str, Any] = {
     "post_roll_s": 5.0,
     "max_clip_s": 120.0,
     "retention_days": 30,
+    "label_top_k": 3,
     "discord_webhook_url": "",
 }
 
@@ -42,6 +43,7 @@ RANGES: dict[str, tuple[float | None, float | None, bool]] = {
     "post_roll_s": (0, None, True),
     "max_clip_s": (0, None, False),
     "retention_days": (0, None, False),
+    "label_top_k": (1, 20, True),
 }
 
 

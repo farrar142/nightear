@@ -7,6 +7,7 @@ const DB_MAX = 0;
 
 import { showClip } from "./clip-player.js";
 
+let labelFilter = ""; // 선택한 라벨(빈 문자열이면 전체)
 let selectedId = null; // 클립 패널에 열려 있는 이벤트
 const levels = []; // {ts, db}
 const lines = []; // {ts, baseline, trigger}
@@ -76,6 +77,10 @@ function draw() {
     ctx.beginPath();
     ctx.moveTo(x1, 0); ctx.lineTo(x1 + 6, 0); ctx.lineTo(x1, 8);
     ctx.fill();
+    if (ev.labels && ev.labels.length) { // 라벨이 붙은 마커에는 1순위 라벨을 쓴다
+      ctx.fillStyle = "#e6e9ef";
+      ctx.fillText(ev.labels[0].label, x1 + 8, 10);
+    }
   }
 
   const series = (arr, key, color, dash) => {
@@ -99,8 +104,36 @@ function draw() {
   }
 }
 
+// 라벨 후보 문자열: "Door 82%, Footsteps 64%" / 진행 중·실패 표시
+function labelText(ev) {
+  if (ev.label_status === "pending") return "  라벨링 중...";
+  if (ev.label_status === "failed") return "  라벨 실패";
+  if (!ev.labels || !ev.labels.length) return "";
+  return "  [" + ev.labels.map((l) => `${l.label} ${Math.round(l.score * 100)}%`).join(", ") + "]";
+}
+
+function matchesFilter(ev) {
+  return !labelFilter || (ev.labels || []).some((l) => l.label === labelFilter);
+}
+
+async function loadLabelOptions() {
+  const sel = $("label-filter");
+  if (!sel) return;
+  try {
+    const list = await (await fetch("/api/labels")).json();
+    sel.innerHTML = '<option value="">전체 라벨</option>';
+    for (const l of list) {
+      const opt = document.createElement("option");
+      opt.value = l.label;
+      opt.textContent = `${l.label} (${l.count})`;
+      sel.appendChild(opt);
+    }
+    sel.value = labelFilter;
+  } catch (_) {}
+}
+
 function sortedEvents() {
-  const list = [...events.values()];
+  const list = [...events.values()].filter(matchesFilter);
   if (sortMode === "size") list.sort((a, b) => b.peak_db - a.peak_db || b.id - a.id);
   else list.sort((a, b) => b.start_ts - a.start_ts || b.id - a.id);
   return list;
@@ -122,7 +155,8 @@ function renderList() {
     const dur = ev.duration_s.toFixed(1);
     li.textContent = `${fmtTime(ev.start_ts)}  ${dur}초  최대 ${ev.peak_db.toFixed(1)} dB  (기준선 ${ev.baseline_db.toFixed(1)})`
       + (ev.ongoing ? "  진행 중" : "") + (ev.truncated ? "  잘림" : "")
-      + (ev.has_clip ? "  ▶ 클립" : ev.audio_deleted ? "  오디오 삭제됨" : "");
+      + (ev.has_clip ? "  ▶ 클립" : ev.audio_deleted ? "  오디오 삭제됨" : "")
+      + labelText(ev);
     li.className = "clickable" + (ev.id === selectedId ? " selected" : "");
     li.addEventListener("click", () => { selectedId = ev.id; showClip(ev); renderList(); });
     listEl.appendChild(li);
@@ -133,6 +167,7 @@ function upsertEvent(ev) {
   events.set(ev.id, ev);
   // 열어 둔 이벤트의 클립이 방금 저장됐으면 패널을 갱신한다
   if (ev.id === selectedId && ev.has_clip) showClip(ev);
+  if (ev.label_status === "done") loadLabelOptions();
   renderList();
   queueDraw();
 }
@@ -148,14 +183,15 @@ export function handleMessage(msg) {
     trimOld(lines, msg.ts);
     const el = $("baseline-text");
     if (el) el.textContent = `기준선 ${msg.baseline_db.toFixed(1)} dB / 트리거 ${msg.trigger_db.toFixed(1)} dB / 하한 ${msg.floor_db.toFixed(1)} dB`;
-  } else if (msg.type === "event" || msg.type === "clip") {
+  } else if (msg.type === "event" || msg.type === "clip" || msg.type === "label") {
     upsertEvent(msg.event);
   }
 }
 
 export async function loadEvents() {
   try {
-    const r = await fetch("/api/events?limit=200");
+    const q = labelFilter ? "&label=" + encodeURIComponent(labelFilter) : "";
+    const r = await fetch("/api/events?limit=200" + q);
     if (!r.ok) return;
     for (const ev of await r.json()) events.set(ev.id, ev);
     renderList();
@@ -168,6 +204,9 @@ export function initGraph() {
   listEl = $("event-list");
   const sel = $("event-sort");
   if (sel) sel.addEventListener("change", () => { sortMode = sel.value; renderList(); });
+  const lf = $("label-filter");
+  if (lf) lf.addEventListener("change", () => { labelFilter = lf.value; renderList(); loadEvents(); });
+  loadLabelOptions();
   window.addEventListener("resize", queueDraw);
   renderList();
   draw();

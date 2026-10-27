@@ -35,6 +35,8 @@ def _to_dict(row) -> dict[str, Any]:
         "clip_duration_s": row["clip_duration_s"] if row["clip_path"] else None,
         "clip_start_ts": row["clip_start_ts"] if row["clip_path"] else None,
         "audio_deleted": bool(row["audio_deleted"]),  # 보관 기간이 지나 오디오만 지워진 이벤트
+        "label_status": row["label_status"],  # None(클립 없음) / pending / done / failed
+        "labels": [],  # [{"label","score"}] 확신도 내림차순. EventStore가 채운다
     }
 
 
@@ -57,9 +59,52 @@ class EventStore:
             except Exception:
                 log.exception("이벤트 구독자 오류(무시하고 계속): %r", listener)
 
+    def _attach_labels(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not events:
+            return events
+        ids = [e["id"] for e in events]
+        marks = ",".join("?" * len(ids))
+        by_event: dict[int, list[dict[str, Any]]] = {}
+        for r in self._db.execute(
+                f"SELECT event_id, label, score FROM event_labels WHERE event_id IN ({marks}) "
+                "ORDER BY event_id, rank", ids):
+            by_event.setdefault(r["event_id"], []).append({"label": r["label"], "score": r["score"]})
+        for e in events:
+            e["labels"] = by_event.get(e["id"], [])
+        return events
+
     def get(self, event_id: int) -> dict[str, Any] | None:
         rows = self._db.execute("SELECT * FROM events WHERE id = ?", (event_id,))
-        return _to_dict(rows[0]) if rows else None
+        return self._attach_labels([_to_dict(rows[0])])[0] if rows else None
+
+    # ---- 라벨링 ----
+    def set_label_status(self, event_id: int, status: str) -> dict[str, Any]:
+        self._db.execute("UPDATE events SET label_status = ? WHERE id = ?", (status, event_id))
+        return self.get(event_id)
+
+    def set_labels(self, event_id: int, labels: list[tuple[str, float]]) -> dict[str, Any]:
+        """상위 라벨 후보를 (순위 순으로) 저장하고 상태를 done 으로 둔다."""
+        self._db.execute("DELETE FROM event_labels WHERE event_id = ?", (event_id,))
+        for rank, (label, score) in enumerate(labels):
+            self._db.execute("INSERT INTO event_labels(event_id, rank, label, score) VALUES(?, ?, ?, ?)",
+                             (event_id, rank, label, score))
+        return self.set_label_status(event_id, "done")
+
+    def pending_label_ids(self) -> list[int]:
+        return [r["id"] for r in self._db.execute(
+            "SELECT id FROM events WHERE label_status = 'pending' AND clip_path IS NOT NULL ORDER BY id")]
+
+    def clip_file(self, event_id: int, clips_dir) -> Any:
+        rows = self._db.execute("SELECT clip_path FROM events WHERE id = ?", (event_id,))
+        if not rows or not rows[0]["clip_path"]:
+            return None
+        path = clips_dir / rows[0]["clip_path"]
+        return path if path.is_file() else None
+
+    def label_counts(self) -> list[dict[str, Any]]:
+        """라벨별 이벤트 수(상위 후보 어디에든 들어 있는 이벤트 기준), 많은 순."""
+        return [{"label": r["label"], "count": r["n"]} for r in self._db.execute(
+            "SELECT label, COUNT(*) AS n FROM event_labels GROUP BY label ORDER BY n DESC, label")]
 
     def set_clip(self, event_id: int, *, path: str, duration_s: float, start_ts: float) -> dict[str, Any]:
         self._db.execute("UPDATE events SET clip_path = ?, clip_duration_s = ?, clip_start_ts = ? WHERE id = ?",
@@ -100,7 +145,8 @@ class EventStore:
         return event
 
     def list(self, *, sort: str = "time", order: str = "desc", limit: int | None = None,
-             since: float | None = None, until: float | None = None) -> list[dict[str, Any]]:
+             since: float | None = None, until: float | None = None,
+             labels: list[str] | None = None) -> list[dict[str, Any]]:
         column = {"time": "start_ts", "size": "peak_db"}[sort]
         direction = "ASC" if order == "asc" else "DESC"
         where: list[str] = []
@@ -111,6 +157,10 @@ class EventStore:
         if until is not None:
             where.append("start_ts < ?")
             params.append(until)
+        if labels:  # 상위 후보 중 하나라도 일치하는 이벤트
+            where.append("id IN (SELECT event_id FROM event_labels WHERE label IN (%s))"
+                         % ",".join("?" * len(labels)))
+            params.extend(labels)
         sql = "SELECT * FROM events"
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -118,7 +168,7 @@ class EventStore:
         if limit is not None:
             sql += " LIMIT ?"
             params.append(limit)
-        return [_to_dict(r) for r in self._db.execute(sql, params)]
+        return self._attach_labels([_to_dict(r) for r in self._db.execute(sql, params)])
 
 
 router = APIRouter(prefix="/api/events", tags=["events"])
@@ -132,5 +182,7 @@ def list_events(
     limit: int | None = Query(None, ge=1, le=10000),
     since: float | None = None,
     until: float | None = None,
+    label: list[str] | None = Query(None),
 ) -> list[dict[str, Any]]:
-    return request.app.state.events.list(sort=sort, order=order, limit=limit, since=since, until=until)
+    return request.app.state.events.list(sort=sort, order=order, limit=limit, since=since, until=until,
+                                         labels=label)
