@@ -159,6 +159,24 @@ function renderList() {
       + labelText(ev);
     li.className = "clickable" + (ev.id === selectedId ? " selected" : "");
     li.addEventListener("click", () => { selectedId = ev.id; showClip(ev); renderList(); });
+    if (ev.has_clip || ev.starred) { // 별표: 켜 두면 보관 기간이 지나도 클립이 남는다
+      const star = document.createElement("button");
+      star.type = "button";
+      star.className = "star-btn";
+      star.textContent = ev.starred ? "★" : "☆";
+      star.title = ev.starred ? "별표 끄기 (보관 기간 후 삭제됨)" : "별표 켜기 (오래 보관)";
+      star.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          const r = await fetch(`/api/events/${ev.id}/star`, {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ starred: !ev.starred }),
+          });
+          if (r.ok) upsertEvent(await r.json());
+        } catch (_) { /* 네트워크 오류면 상태를 바꾸지 않는다 */ }
+      });
+      li.prepend(star);
+    }
     listEl.appendChild(li);
   }
 }
