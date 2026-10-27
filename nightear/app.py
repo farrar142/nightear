@@ -9,7 +9,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import ingest, realtime, settings
 from .clock import Clock, SystemClock
+from .frames import Frame, FramePipeline
 from .ingest import IngestState
+from .levels import FRAME_MS
 from .realtime import RealtimeHub
 from .settings import SettingsStore
 from .storage import Database
@@ -30,6 +32,18 @@ def create_app(
     app.state.settings = SettingsStore(db)
     app.state.hub = RealtimeHub()
     app.state.ingest_state = IngestState()
+    app.state.frames = FramePipeline()
+
+    async def broadcast_level(frame: Frame) -> None:
+        await app.state.hub.broadcast({
+            "type": "level",
+            "source_id": frame.source_id,
+            "ts": frame.ts,
+            "db": frame.db,
+            "frame_ms": FRAME_MS,
+        })
+
+    app.state.frames.register(broadcast_level)
 
     @app.get("/api/status")
     def status() -> dict:

@@ -56,17 +56,28 @@ async function stopCapture() {
 async function startCapture() {
   await stopCapture();
   const deviceId = $("device").value || savedDeviceId();
+  const constraints = (id) => ({
+    audio: {
+      deviceId: id ? { exact: id } : undefined,
+      // 브라우저 후처리를 모두 꺼서 원음을 받는다 (소음이 지워지지 않도록)
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    },
+  });
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        deviceId: deviceId ? { exact: deviceId } : undefined,
-        // 브라우저 후처리를 모두 꺼서 원음을 받는다 (소음이 지워지지 않도록)
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-      },
-    });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints(deviceId));
+    } catch (err) {
+      // 저장해 둔 장치가 사라졌으면 기본 장치로 한 번만 재시도한다.
+      if (deviceId && err && (err.name === "OverconstrainedError" || err.name === "NotFoundError")) {
+        try { localStorage.removeItem(DEVICE_KEY); } catch (_) {}
+        stream = await navigator.mediaDevices.getUserMedia(constraints(""));
+      } else {
+        throw err;
+      }
+    }
   } catch (err) {
     if (err && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
       setBadge($("ingest-status"), "마이크 권한 없음", "bad");
@@ -75,6 +86,8 @@ async function startCapture() {
     }
     return;
   }
+  // 장치가 빠지거나 권한이 회수되어 트랙이 끝나면 끊김으로 표시한다.
+  stream.getAudioTracks().forEach((t) => t.addEventListener("ended", () => setBadge($("ingest-status"), "끊김", "bad")));
 
   // 권한을 받은 뒤에야 장치 라벨이 보이므로 목록을 다시 채운다.
   const activeId = stream.getAudioTracks()[0].getSettings().deviceId;

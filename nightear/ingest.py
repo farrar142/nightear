@@ -11,11 +11,13 @@
 from __future__ import annotations
 
 import json
+import itertools
 from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import APIRouter, WebSocket
 
+from .frames import Frame, FrameClock
 from .levels import CHANNELS, FRAME_MS, SAMPLE_RATE, FrameSplitter, rms_dbfs
 
 WS_POLICY_VIOLATION = 1008
@@ -25,14 +27,21 @@ WS_POLICY_VIOLATION = 1008
 class IngestState:
     """현재 붙어 있는 수집 소스 상태(대시보드 표시용)."""
 
-    sources: list[str] = field(default_factory=list)
+    # 연결(connection) id -> source_id. 같은 source_id의 탭이 둘이어도 연결별로 구분한다.
+    connections: dict[int, str] = field(default_factory=dict)
+    _ids: Any = field(default_factory=itertools.count, repr=False)
+
+    def add(self, source_id: str) -> int:
+        conn_id = next(self._ids)
+        self.connections[conn_id] = source_id
+        return conn_id
+
+    def remove(self, conn_id: int) -> None:
+        self.connections.pop(conn_id, None)
 
     def snapshot(self) -> dict[str, Any]:
-        return {
-            "type": "state",
-            "source_connected": bool(self.sources),
-            "source_id": self.sources[-1] if self.sources else None,
-        }
+        last = list(self.connections.values())[-1] if self.connections else None
+        return {"type": "state", "source_connected": bool(self.connections), "source_id": last}
 
 
 class HelloError(ValueError):
@@ -80,12 +89,13 @@ async def ingest_ws(ws: WebSocket) -> None:
         return
 
     source_id: str = hello["source_id"]
-    state.sources.append(source_id)
+    conn_id = state.add(source_id)
     await ws.send_json({"type": "hello_ack", "source_id": source_id})
     await hub.broadcast({"type": "source", "state": "connected", "source_id": source_id,
                          "idle_detection_supported": hello["idle_detection_supported"]})
 
     splitter = FrameSplitter()
+    frame_clock = FrameClock(clock.now().timestamp(), FRAME_MS / 1000.0)
     try:
         while True:
             event = await ws.receive()
@@ -94,15 +104,11 @@ async def ingest_ws(ws: WebSocket) -> None:
             data = event.get("bytes")
             if data is not None:
                 for frame in splitter.push(data):
-                    await hub.broadcast({
-                        "type": "level",
-                        "source_id": source_id,
-                        "ts": clock.now().timestamp(),
-                        "db": rms_dbfs(frame),
-                        "frame_ms": FRAME_MS,
-                    })
+                    ts = frame_clock.next_ts(clock.now().timestamp())
+                    await app.state.frames.dispatch(
+                        Frame(source_id=source_id, ts=ts, db=rms_dbfs(frame), pcm=frame)
+                    )
             # 텍스트(활동 메시지)는 이 티켓에서는 소비하지 않는다.
     finally:
-        if source_id in state.sources:
-            state.sources.remove(source_id)
+        state.remove(conn_id)
         await hub.broadcast({"type": "source", "state": "disconnected", "source_id": source_id})
