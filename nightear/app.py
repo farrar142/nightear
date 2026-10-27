@@ -11,12 +11,8 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-<<<<<<< HEAD
-from . import clips, events, labeling, stats, gaps, ingest, realtime, settings, sleep
-=======
-from . import events, gaps, ingest, nights, realtime, settings, sleep
+from . import clips, events, labeling, stats, gaps, ingest, nights, realtime, settings, sleep
 from .history import LevelHistory
->>>>>>> worktree-agent-a1888b5c358a5180d
 from .clock import Clock, SystemClock
 from .detection import EventDetector
 from .frames import Frame, FramePipeline
