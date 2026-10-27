@@ -20,6 +20,13 @@ def test_그래프_스크립트가_서빙된다(client):
     assert "graph" in client.get("/").text
 
 
+<<<<<<< HEAD
 def test_통계_스크립트가_서빙된다(client):
     assert client.get("/stats.js").status_code == 200
     assert "stats-heat" in client.get("/").text
+=======
+def test_타임라인_스크립트가_서빙되고_연결된다(client):
+    assert client.get("/timeline.js").status_code == 200
+    assert "timeline.js" in client.get("/app.js").text
+    assert "tl-canvas" in client.get("/").text
+>>>>>>> worktree-agent-a1888b5c358a5180d

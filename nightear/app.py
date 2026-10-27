@@ -11,7 +11,12 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
+<<<<<<< HEAD
 from . import clips, events, labeling, stats, gaps, ingest, realtime, settings, sleep
+=======
+from . import events, gaps, ingest, nights, realtime, settings, sleep
+from .history import LevelHistory
+>>>>>>> worktree-agent-a1888b5c358a5180d
 from .clock import Clock, SystemClock
 from .detection import EventDetector
 from .frames import Frame, FramePipeline
@@ -90,6 +95,10 @@ def create_app(
     app.state.clips_dir = Path(clips_dir or os.environ.get("NIGHTEAR_CLIPS")
                                or db.path.parent / "clips")
     app.state.sleep = SleepMode(app.state)
+    app.state.history = LevelHistory(db)  # 1초 해상도 레벨 기록(밤 타임라인용)
+    app.state.frames.register(app.state.history)
+    lifecycle.add(stop=app.state.history.flush_all)
+    app.state.nights = nights.NightService(app.state, app.state.history)
     lifecycle.add(app.state.sleep.start, app.state.sleep.stop)
 
     async def broadcast_event(kind: str, event: dict) -> None:
@@ -133,6 +142,7 @@ def create_app(
     app.include_router(labeling.router)
     app.include_router(stats.router)
     app.include_router(sleep.router)
+    app.include_router(nights.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)
 
