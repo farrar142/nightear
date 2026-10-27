@@ -8,6 +8,7 @@ from nightear.app import create_app
 
 from .support.classifier import FakeClassifier
 from .support.clock import FakeClock
+from .support.notifier import FakeNotifier
 
 
 @pytest.fixture
@@ -26,7 +27,8 @@ def make_app(clock, db_path):
 
     def _make(**overrides):
         # 기본 분류기는 가짜: 실제 YAMNet 은 스모크 테스트에서만 쓴다.
-        kwargs = {"clock": clock, "db_path": db_path, "classifier": FakeClassifier()}
+        kwargs = {"clock": clock, "db_path": db_path, "classifier": FakeClassifier(),
+                  "notifier": FakeNotifier()}
         kwargs.update(overrides)
         return create_app(**kwargs)
 

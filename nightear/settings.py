@@ -27,6 +27,8 @@ DEFAULTS: dict[str, Any] = {
     "retention_days": 30,
     "label_top_k": 3,
     "discord_webhook_url": "",
+    "dashboard_base_url": "",  # 요약 속 대시보드 링크의 기준 주소(비우면 링크 생략)
+    "summary_grace_minutes": 30,  # 수면 모드 해제 후 이 시간 재진입이 없으면 아침 요약 발송
 }
 
 # 키별 (최솟값, 최댓값, 최솟값 포함 여부). None은 제한 없음.
@@ -44,6 +46,7 @@ RANGES: dict[str, tuple[float | None, float | None, bool]] = {
     "max_clip_s": (0, None, False),
     "retention_days": (0, None, False),
     "label_top_k": (1, 20, True),
+    "summary_grace_minutes": (0, None, True),
 }
 
 

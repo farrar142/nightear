@@ -42,6 +42,12 @@ SCHEMA_STATEMENTS: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_event_labels_label ON event_labels(label)",
+    """
+    CREATE TABLE IF NOT EXISTS summarized_nights (
+        night_id TEXT PRIMARY KEY,
+        sent_ts REAL NOT NULL
+    )
+    """,
 ]
 
 # (테이블, 컬럼, 정의): CREATE TABLE에 나중에 추가된 컬럼. 기존 DB에 ALTER로 보강한다.

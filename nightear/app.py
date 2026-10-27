@@ -11,7 +11,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import clips, events, labeling, stats, gaps, ingest, nights, realtime, settings, sleep
+from . import clips, events, labeling, stats, gaps, ingest, nights, realtime, settings, sleep, summary
 from .history import LevelHistory
 from .clock import Clock, SystemClock
 from .detection import EventDetector
@@ -65,6 +65,7 @@ def create_app(
     db_path: str | Path | None = None,
     clips_dir: str | Path | None = None,
     classifier: labeling.SoundClassifier | None = None,
+    notifier: summary.Notifier | None = None,
     static_dir: Path | None = STATIC_DIR,
 ) -> FastAPI:
     db = Database(db_path or os.environ.get("NIGHTEAR_DB", "data/nightear.db"))
@@ -96,6 +97,10 @@ def create_app(
     lifecycle.add(stop=app.state.history.flush_all)
     app.state.nights = nights.NightService(app.state, app.state.history)
     lifecycle.add(app.state.sleep.start, app.state.sleep.stop)
+    # 알림기 포트: 기본은 Discord 웹훅(URL 설정이 비어 있으면 보내지 않는다). 테스트는 가짜를 주입한다.
+    app.state.summary = summary.SummaryService(
+        app.state, notifier or summary.DiscordWebhookNotifier(app.state.settings))
+    lifecycle.add(app.state.summary.start, app.state.summary.stop)
 
     async def broadcast_event(kind: str, event: dict) -> None:
         await app.state.hub.broadcast({"type": "event", "phase": kind, "event": event})
