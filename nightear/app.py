@@ -11,7 +11,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import clips, events, labeling, gaps, ingest, realtime, settings, sleep
+from . import clips, events, labeling, stats, gaps, ingest, realtime, settings, sleep
 from .clock import Clock, SystemClock
 from .detection import EventDetector
 from .frames import Frame, FramePipeline
@@ -131,6 +131,7 @@ def create_app(
     app.include_router(events.router)
     app.include_router(clips.router)
     app.include_router(labeling.router)
+    app.include_router(stats.router)
     app.include_router(sleep.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)

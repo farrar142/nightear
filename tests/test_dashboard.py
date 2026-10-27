@@ -18,3 +18,8 @@ def test_클립_플레이어_스크립트가_서빙된다(client):
 def test_그래프_스크립트가_서빙된다(client):
     assert client.get("/graph.js").status_code == 200
     assert "graph" in client.get("/").text
+
+
+def test_통계_스크립트가_서빙된다(client):
+    assert client.get("/stats.js").status_code == 200
+    assert "stats-heat" in client.get("/").text

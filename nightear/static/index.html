@@ -27,6 +27,12 @@
     .clip-panel { margin-top: 12px; padding: 12px; background: #1d2230; border: 1px solid #343b50; border-radius: 6px; }
     .clip-wave { display: block; width: 100%; height: 90px; cursor: pointer; margin-bottom: 8px; }
     .clip-panel audio { width: 100%; margin-bottom: 8px; }
+    .stats-heat { display: block; width: 100%; height: 190px; background: #1d2230; border: 1px solid #343b50; border-radius: 6px; margin-bottom: 6px; }
+    .stats-labels li { display: flex; gap: 10px; align-items: center; }
+    .stat-name { width: 160px; flex: none; overflow: hidden; text-overflow: ellipsis; }
+    .stat-bar { flex: 1; background: #262c3d; border-radius: 4px; height: 10px; }
+    .stat-bar i { display: block; height: 100%; background: #6aa5ff; border-radius: 4px; }
+    .stat-n { width: 36px; text-align: right; }
     .clip-panel a { color: #6aa5ff; }
   </style>
 </head>
@@ -74,6 +80,19 @@
     </div>
   </div>
 
+  <div class="row" style="margin-top:28px">
+    <h2 style="font-size:16px;margin:0">패턴 통계</h2>
+    <select id="stats-period">
+      <option value="7">최근 7일</option><option value="30" selected>최근 30일</option><option value="0">전체</option>
+    </select>
+    <button id="stats-refresh" type="button">새로고침</button>
+    <small id="stats-total"></small>
+  </div>
+  <canvas id="stats-heat" class="stats-heat"></canvas>
+  <small>요일(행) × 시간대(열)별 이벤트 수</small>
+  <ul id="stats-labels" class="events stats-labels"></ul>
+
+  <script src="stats.js" type="module"></script>
   <script src="app.js" type="module"></script>
 </body>
 </html>
