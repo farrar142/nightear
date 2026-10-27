@@ -87,6 +87,7 @@ def test_합성_하룻밤_상세(client, clock):
 def test_다른_밤의_데이터는_잘려_나간다(client, clock):
     with ingest(client) as src:
         src.send_pcm(audio.tone(-40, 2.0))
+    wait_gap_open(client)
     clock.set(datetime(2025, 1, 16, 23, 0, tzinfo=KST))
     with ingest(client) as src:
         src.send_pcm(audio.tone(-40, 4.0))
