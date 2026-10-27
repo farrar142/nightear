@@ -25,23 +25,42 @@ WS_POLICY_VIOLATION = 1008
 
 @dataclass
 class IngestState:
-    """현재 붙어 있는 수집 소스 상태(대시보드 표시용)."""
+    """현재 붙어 있는 수집 소스 상태(대시보드 표시용).
 
-    # 연결(connection) id -> source_id. 같은 source_id의 탭이 둘이어도 연결별로 구분한다.
+    단일 활성 소스 정책: 먼저 붙은 연결이 active, 이후 연결은 secondary(표시 전용, 프레임 미수집).
+    active가 떠나면 남은 secondary 중 가장 최근에 붙은 연결이 active로 승격된다.
+    """
+
+    # 연결(connection) id -> source_id. 같은 source_id의 탭이 둘이어도 연결별로 구분한다. 삽입 순서 = 접속 순서.
     connections: dict[int, str] = field(default_factory=dict)
+    sockets: dict[int, Any] = field(default_factory=dict, repr=False)
+    active_id: int | None = None
     _ids: Any = field(default_factory=itertools.count, repr=False)
 
-    def add(self, source_id: str) -> int:
+    def add(self, source_id: str, ws: Any = None) -> int:
         conn_id = next(self._ids)
         self.connections[conn_id] = source_id
+        self.sockets[conn_id] = ws
+        if self.active_id is None:
+            self.active_id = conn_id
         return conn_id
 
-    def remove(self, conn_id: int) -> None:
+    def remove(self, conn_id: int) -> int | None:
+        """연결을 제거한다. active였다면 승격된 연결 id를 돌려준다(없으면 None)."""
         self.connections.pop(conn_id, None)
+        self.sockets.pop(conn_id, None)
+        if self.active_id != conn_id:
+            return None
+        self.active_id = next(reversed(self.connections), None)
+        return self.active_id
+
+    def is_active(self, conn_id: int) -> bool:
+        return self.active_id == conn_id
 
     def snapshot(self) -> dict[str, Any]:
-        last = list(self.connections.values())[-1] if self.connections else None
-        return {"type": "state", "source_connected": bool(self.connections), "source_id": last}
+        active = self.connections.get(self.active_id) if self.active_id is not None else None
+        return {"type": "state", "source_connected": self.active_id is not None, "source_id": active,
+                "active_source_id": active, "source_count": len(self.connections)}
 
 
 class HelloError(ValueError):
@@ -89,10 +108,17 @@ async def ingest_ws(ws: WebSocket) -> None:
         return
 
     source_id: str = hello["source_id"]
-    conn_id = state.add(source_id)
+    conn_id = state.add(source_id, ws)
+    gaps = app.state.gaps
+    is_active = state.is_active(conn_id)
     await ws.send_json({"type": "hello_ack", "source_id": source_id})
+    await ws.send_json({"type": "role", "role": "active" if is_active else "secondary"})
+    if is_active and gaps.source_active(clock.now().timestamp()):
+        await hub.broadcast({"type": "gap", "state": "ended", "ts": clock.now().timestamp()})
     await hub.broadcast({"type": "source", "state": "connected", "source_id": source_id,
+                         "role": "active" if is_active else "secondary",
                          "idle_detection_supported": hello["idle_detection_supported"]})
+    await hub.broadcast(state.snapshot())
 
     splitter = FrameSplitter()
     frame_clock = FrameClock(clock.now().timestamp(), FRAME_MS / 1000.0)
@@ -103,12 +129,35 @@ async def ingest_ws(ws: WebSocket) -> None:
                 break
             data = event.get("bytes")
             if data is not None:
+                if not state.is_active(conn_id):
+                    # secondary: 표시 전용. 프레임은 파이프라인에 넣지 않는다(이중 수집 방지).
+                    is_active = False
+                    continue
+                if not is_active:
+                    # 승격 직후: 이전 secondary 시절의 잔여 샘플/시각 앵커를 버리고 지금부터 다시 앵커한다.
+                    is_active = True
+                    splitter = FrameSplitter()
+                    frame_clock = FrameClock(clock.now().timestamp(), FRAME_MS / 1000.0)
                 for frame in splitter.push(data):
-                    ts = frame_clock.next_ts(clock.now().timestamp())
+                    now_ts = clock.now().timestamp()
+                    ts = frame_clock.next_ts(now_ts)
+                    gaps.heartbeat(now_ts)
                     await app.state.frames.dispatch(
                         Frame(source_id=source_id, ts=ts, db=rms_dbfs(frame), pcm=frame)
                     )
             # 텍스트(활동 메시지)는 이 티켓에서는 소비하지 않는다.
     finally:
-        state.remove(conn_id)
+        was_active = state.is_active(conn_id)
+        promoted = state.remove(conn_id)
+        now_ts = clock.now().timestamp()
+        if was_active and promoted is None:
+            if gaps.source_lost(now_ts):
+                await hub.broadcast({"type": "gap", "state": "started", "ts": now_ts})
         await hub.broadcast({"type": "source", "state": "disconnected", "source_id": source_id})
+        if promoted is not None:
+            gaps.heartbeat(now_ts)
+            try:
+                await state.sockets[promoted].send_json({"type": "role", "role": "active"})
+            except Exception:
+                pass  # 승격 대상이 이미 끊긴 경우: 그 연결의 정리 경로가 다음 승격/공백을 처리한다
+        await hub.broadcast(state.snapshot())

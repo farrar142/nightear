@@ -46,9 +46,61 @@ async function refreshDevices() {
 let stream = null;
 let audioCtx = null;
 let ingestWs = null;
+let ingestWanted = false; // 사용자가 수집을 켜 둔 상태인가(끊기면 자동 재연결)
+let ingestTimer = null;
+
+// 지수 백오프 재연결: 1s,2s,4s... 상한 30s, 연결 성공(hello_ack) 시 초기화.
+const BACKOFF_MIN_MS = 1000;
+const BACKOFF_MAX_MS = 30000;
+const nextBackoff = (ms) => Math.min(ms * 2, BACKOFF_MAX_MS);
+
+function showRole(role) {
+  const el = $("role-status");
+  if (role === "active") setBadge(el, "활성 소스", "ok");
+  else if (role === "secondary") setBadge(el, "보조(표시 전용)", "");
+  else setBadge(el, "-", "");
+}
+
+function connectIngest(delay = BACKOFF_MIN_MS) {
+  ingestTimer = null;
+  if (!ingestWanted) return;
+  const ws = new WebSocket(wsUrl("/ws/ingest"));
+  ingestWs = ws;
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type: "hello",
+      source_id: sourceId(),
+      sample_rate: 16000,
+      channels: 1,
+      idle_detection_supported: IDLE_DETECTION_SUPPORTED,
+    }));
+  };
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === "hello_ack") { delay = BACKOFF_MIN_MS; setBadge($("ingest-status"), "연결됨", "ok"); }
+    if (msg.type === "role") showRole(msg.role);
+    if (msg.type === "error") setBadge($("ingest-status"), "거부됨: " + msg.message, "bad");
+  };
+  ws.onclose = () => {
+    if (ingestWs === ws) ingestWs = null;
+    showRole(null);
+    if (!ingestWanted) return;
+    setBadge($("ingest-status"), "재연결 중...", "bad");
+    if (!ingestTimer) ingestTimer = setTimeout(() => connectIngest(nextBackoff(delay)), delay);
+  };
+  ws.onerror = () => {}; // onclose가 뒤따라 재연결을 처리한다
+}
+
+function disconnectIngest() {
+  ingestWanted = false;
+  if (ingestTimer) { clearTimeout(ingestTimer); ingestTimer = null; }
+  if (ingestWs) { ingestWs.onclose = null; ingestWs.close(); ingestWs = null; }
+  showRole(null);
+}
 
 async function stopCapture() {
-  if (ingestWs) { ingestWs.onclose = null; ingestWs.close(); ingestWs = null; }
+  disconnectIngest();
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   if (audioCtx) { await audioCtx.close(); audioCtx = null; }
 }
@@ -99,24 +151,8 @@ async function startCapture() {
   const node = new AudioWorkletNode(audioCtx, "capture-processor", { channelCount: 1, channelCountMode: "explicit" });
   audioCtx.createMediaStreamSource(stream).connect(node);
 
-  ingestWs = new WebSocket(wsUrl("/ws/ingest"));
-  ingestWs.binaryType = "arraybuffer";
-  ingestWs.onopen = () => {
-    ingestWs.send(JSON.stringify({
-      type: "hello",
-      source_id: sourceId(),
-      sample_rate: 16000,
-      channels: 1,
-      idle_detection_supported: IDLE_DETECTION_SUPPORTED,
-    }));
-  };
-  ingestWs.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === "hello_ack") setBadge($("ingest-status"), "연결됨", "ok");
-    if (msg.type === "error") setBadge($("ingest-status"), "거부됨: " + msg.message, "bad");
-  };
-  ingestWs.onclose = () => setBadge($("ingest-status"), "끊김", "bad");
-  ingestWs.onerror = () => setBadge($("ingest-status"), "끊김", "bad");
+  ingestWanted = true;
+  connectIngest();
   node.port.onmessage = (ev) => {
     if (ingestWs && ingestWs.readyState === WebSocket.OPEN) ingestWs.send(ev.data);
   };
@@ -129,16 +165,22 @@ function showLevel(db) {
   $("meter-db").textContent = db.toFixed(1) + " dBFS";
 }
 
+let realtimeDelay = BACKOFF_MIN_MS;
 function connectRealtime() {
   const ws = new WebSocket(wsUrl("/ws/realtime"));
-  ws.onopen = () => setBadge($("realtime-status"), "연결됨", "ok");
+  ws.onopen = () => { realtimeDelay = BACKOFF_MIN_MS; setBadge($("realtime-status"), "연결됨", "ok"); };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === "level") showLevel(msg.db);
+    if (msg.type === "state") {
+      const el = $("active-source");
+      if (el) el.textContent = msg.active_source_id || "없음";
+    }
   };
   ws.onclose = () => {
     setBadge($("realtime-status"), "끊김", "bad");
-    setTimeout(connectRealtime, 2000); // 화면용 채널이므로 단순 재시도
+    setTimeout(connectRealtime, realtimeDelay); // 수집 채널과 같은 지수 백오프
+    realtimeDelay = nextBackoff(realtimeDelay);
   };
 }
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, realtime, settings
+from . import gaps, ingest, realtime, settings
 from .clock import Clock, SystemClock
 from .frames import Frame, FramePipeline
 from .ingest import IngestState
@@ -32,6 +32,7 @@ def create_app(
     app.state.settings = SettingsStore(db)
     app.state.hub = RealtimeHub()
     app.state.ingest_state = IngestState()
+    app.state.gaps = gaps.GapStore(db)
     app.state.frames = FramePipeline()
 
     async def broadcast_level(frame: Frame) -> None:
@@ -50,6 +51,7 @@ def create_app(
         return app.state.ingest_state.snapshot()
 
     app.include_router(settings.router)
+    app.include_router(gaps.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)
 
