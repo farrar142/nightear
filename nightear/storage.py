@@ -29,7 +29,8 @@ SCHEMA_STATEMENTS: list[str] = [
         clip_duration_s REAL,
         clip_start_ts REAL,
         audio_deleted INTEGER NOT NULL DEFAULT 0,
-        label_status TEXT
+        label_status TEXT,
+        starred INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -58,6 +59,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("events", "clip_start_ts", "REAL"),
     ("events", "audio_deleted", "INTEGER NOT NULL DEFAULT 0"),
     ("events", "label_status", "TEXT"),
+    ("events", "starred", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

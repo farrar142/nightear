@@ -162,9 +162,13 @@ class SummaryService:
             self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            self._task = None
+        task, self._task = self._task, None
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     async def _loop(self) -> None:
         while True:

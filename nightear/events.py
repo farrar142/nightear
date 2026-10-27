@@ -35,6 +35,7 @@ def _to_dict(row) -> dict[str, Any]:
         "clip_duration_s": row["clip_duration_s"] if row["clip_path"] else None,
         "clip_start_ts": row["clip_start_ts"] if row["clip_path"] else None,
         "audio_deleted": bool(row["audio_deleted"]),  # 보관 기간이 지나 오디오만 지워진 이벤트
+        "starred": bool(row["starred"]),  # 별표 이벤트의 클립은 보관 정리에서 제외된다
         "label_status": row["label_status"],  # None(클립 없음) / pending / done / failed
         "labels": [],  # [{"label","score"}] 확신도 내림차순. EventStore가 채운다
     }
@@ -109,6 +110,10 @@ class EventStore:
     def set_clip(self, event_id: int, *, path: str, duration_s: float, start_ts: float) -> dict[str, Any]:
         self._db.execute("UPDATE events SET clip_path = ?, clip_duration_s = ?, clip_start_ts = ? WHERE id = ?",
                          (path, duration_s, start_ts, event_id))
+        return self.get(event_id)
+
+    def set_starred(self, event_id: int, starred: bool) -> dict[str, Any] | None:
+        self._db.execute("UPDATE events SET starred = ? WHERE id = ?", (int(starred), event_id))
         return self.get(event_id)
 
     def clear_clip(self, event_id: int) -> None:
