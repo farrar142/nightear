@@ -7,7 +7,8 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from . import ingest, realtime, settings
+from . import ingest, realtime, settings, sleep
+from .sleep import SleepMode
 from .clock import Clock, SystemClock
 from .frames import Frame, FramePipeline
 from .ingest import IngestState
@@ -33,6 +34,15 @@ def create_app(
     app.state.hub = RealtimeHub()
     app.state.ingest_state = IngestState()
     app.state.frames = FramePipeline()
+    app.state.sleep = SleepMode(app.state)
+
+    @app.on_event("startup")
+    async def _start_sleep() -> None:
+        app.state.sleep.start()
+
+    @app.on_event("shutdown")
+    async def _stop_sleep() -> None:
+        await app.state.sleep.stop()
 
     async def broadcast_level(frame: Frame) -> None:
         await app.state.hub.broadcast({
@@ -50,6 +60,7 @@ def create_app(
         return app.state.ingest_state.snapshot()
 
     app.include_router(settings.router)
+    app.include_router(sleep.router)
     app.include_router(ingest.router)
     app.include_router(realtime.router)
 

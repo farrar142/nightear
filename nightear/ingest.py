@@ -93,6 +93,7 @@ async def ingest_ws(ws: WebSocket) -> None:
     await ws.send_json({"type": "hello_ack", "source_id": source_id})
     await hub.broadcast({"type": "source", "state": "connected", "source_id": source_id,
                          "idle_detection_supported": hello["idle_detection_supported"]})
+    await app.state.sleep.handle_hello(hello["idle_detection_supported"])
 
     splitter = FrameSplitter()
     frame_clock = FrameClock(clock.now().timestamp(), FRAME_MS / 1000.0)
@@ -108,7 +109,13 @@ async def ingest_ws(ws: WebSocket) -> None:
                     await app.state.frames.dispatch(
                         Frame(source_id=source_id, ts=ts, db=rms_dbfs(frame), pcm=frame)
                     )
-            # 텍스트(활동 메시지)는 이 티켓에서는 소비하지 않는다.
+            elif event.get("text"):
+                try:
+                    msg = json.loads(event["text"])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(msg, dict) and msg.get("type") == "activity":
+                    await app.state.sleep.handle_activity(msg)
     finally:
         state.remove(conn_id)
         await hub.broadcast({"type": "source", "state": "disconnected", "source_id": source_id})
