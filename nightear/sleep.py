@@ -101,6 +101,8 @@ class SleepMode:
             return  # inf/NaN/비숫자는 잘못된 메시지로 보고 무시한다
         if secs < 0:
             secs = 0.0
+        if state != self._activity_state:  # 수면 해제가 늦은 원인을 나중에 로그로 확인하려고 남긴다
+            log.info("활동 상태 %s -> %s (idle_seconds=%.0f)", self._activity_state, state, secs)
         self._activity_state = state
         self._idle_start = None if state == "active" else self._now_ts() - float(secs)
         await self.evaluate()
@@ -155,9 +157,11 @@ class SleepMode:
                 self._open_id, self._open_start = rows[0]["id"], now
                 self._last_persist = now
                 transition = SleepTransition(True, now, now, None)
+                log.info("수면 모드 시작 %s", reasons)
             elif not want and self._open_id is not None:
                 self._s.db.execute("UPDATE sleep_sessions SET end_ts = ? WHERE id = ?", (now, self._open_id))
                 transition = SleepTransition(False, now, self._open_start, now)
+                log.info("수면 모드 해제 %s", reasons)
                 self._open_id = self._open_start = None
             elif self._open_id is not None and now - self._last_persist >= PERSIST_SECONDS:
                 self._s.db.execute("UPDATE sleep_sessions SET last_ts = ? WHERE id = ?", (now, self._open_id))

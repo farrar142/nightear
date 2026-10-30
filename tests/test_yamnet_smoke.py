@@ -32,3 +32,17 @@ def test_수집부터_라벨까지_실제_모델로_이어진다(make_app):
             lambda m: m["type"] == "label" and m["event"]["label_status"] in ("done", "failed"), limit=1000)
     assert done["event"]["label_status"] == "done", done
     assert done["event"]["labels"]
+
+
+def test_앞뒤가_조용한_클립에서도_1순위가_Silence가_아니다(make_app):
+    # 실제 클립처럼 앞 pre_roll(10초)과 뒤 post_roll(5초)이 조용하다. 클립 전체를 분류하면 Silence 가 1순위가 된다.
+    quiet = audio.silence(15.0)
+    assert classifier.classify(quiet + audio.noise(-20.0, 2.0, seed=3) + audio.silence(5.0), 16000)[0][0] == "Silence"
+    pcm = quiet + audio.noise(-20.0, 2.0, seed=3) + audio.silence(20.0)
+    with TestClient(make_app(classifier=YamnetClassifier())) as client, realtime(client) as rt, ingest(client) as src:
+        src.send_pcm(pcm)
+        done = rt.receive_until(
+            lambda m: m["type"] == "label" and m["event"]["label_status"] in ("done", "failed"), limit=1000)
+    labels = [l["label"] for l in done["event"]["labels"]]
+    assert labels and "Silence" not in labels
+    assert "noise" in labels[0].lower(), labels

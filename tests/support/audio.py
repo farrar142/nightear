@@ -58,6 +58,13 @@ def noise_with_bursts(
     return _to_pcm(samples)
 
 
+def rms_dbfs(pcm: bytes) -> float:
+    n = len(pcm) // 2
+    samples = struct.unpack(f"<{n}h", pcm[: n * 2])
+    rms = math.sqrt(sum(x * x for x in samples) / n) if n else 0.0
+    return 20.0 * math.log10(rms / 32768.0) if rms > 0 else -120.0
+
+
 def chunks(pcm: bytes, chunk_ms: int = 100) -> list[bytes]:
     """PCM을 chunk_ms 단위 바이너리 프레임으로 나눈다."""
     size = SAMPLE_RATE * chunk_ms // 1000 * 2

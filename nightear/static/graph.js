@@ -14,6 +14,7 @@ const lines = []; // {ts, baseline, trigger}
 const events = new Map(); // id -> event
 let floorDb = null;
 let sortMode = "time";
+let dayRange = null; // {since, until} 선택한 날짜, null 이면 최근
 let canvas = null;
 let listEl = null;
 let drawQueued = false;
@@ -133,14 +134,50 @@ async function loadLabelOptions() {
 }
 
 function sortedEvents() {
-  const list = [...events.values()].filter(matchesFilter);
+  const list = [...events.values()].filter(matchesFilter).filter(inDay);
   if (sortMode === "size") list.sort((a, b) => b.peak_db - a.peak_db || b.id - a.id);
   else list.sort((a, b) => b.start_ts - a.start_ts || b.id - a.id);
   return list;
 }
 
+// 날짜를 고르면 그날(로컬 자정~자정) 이벤트만 본다. 비어 있으면 최근 이벤트.
+function inDay(ev) {
+  return !dayRange || (ev.start_ts >= dayRange.since && ev.start_ts < dayRange.until);
+}
+
+function dayRangeOf(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
+  if (!m) return null;
+  const y = +m[1], mo = +m[2] - 1, d = +m[3];
+  return { since: new Date(y, mo, d).getTime() / 1000, until: new Date(y, mo, d + 1).getTime() / 1000 };
+}
+
+// 시간순 목록은 시간대(1시간)별로 접어 둔다. 기본은 가장 최근 시간대만 펼친다.
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const openedGroups = new Set();
+const closedGroups = new Set();
+
+function groupKey(ts) {
+  const d = new Date(ts * 1000);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}-${d.getHours()}`;
+}
+
+function groupTitle(ts) {
+  const d = new Date(ts * 1000);
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEKDAYS[d.getDay()]}) ${String(d.getHours()).padStart(2, "0")}시`;
+}
+
+function groupSummary(list) {
+  const peak = Math.max(...list.map((e) => e.peak_db));
+  const clips = list.filter((e) => e.has_clip).length;
+  const stars = list.filter((e) => e.starred).length;
+  return `${list.length}건 · 최대 ${peak.toFixed(1)} dB` + (clips ? ` · 클립 ${clips}` : "") + (stars ? ` · ★${stars}` : "");
+}
+
 function renderList() {
   if (!listEl) return;
+  const scroller = listEl.parentElement;
+  const scrollTop = scroller ? scroller.scrollTop : 0;
   listEl.innerHTML = "";
   const list = sortedEvents();
   if (!list.length) {
@@ -150,41 +187,79 @@ function renderList() {
     listEl.appendChild(li);
     return;
   }
-  for (const ev of list) {
-    const li = document.createElement("li");
-    const dur = ev.duration_s.toFixed(1);
-    li.textContent = `${fmtTime(ev.start_ts)}  ${dur}초  최대 ${ev.peak_db.toFixed(1)} dB  (기준선 ${ev.baseline_db.toFixed(1)})`
-      + (ev.ongoing ? "  진행 중" : "") + (ev.truncated ? "  잘림" : "")
-      + (ev.has_clip ? "  ▶ 클립" : ev.audio_deleted ? "  오디오 삭제됨" : "")
-      + labelText(ev);
-    li.className = "clickable" + (ev.id === selectedId ? " selected" : "");
-    li.addEventListener("click", () => { selectedId = ev.id; showClip(ev); renderList(); });
-    if (ev.has_clip || ev.starred) { // 별표: 켜 두면 보관 기간이 지나도 클립이 남는다
-      const star = document.createElement("button");
-      star.type = "button";
-      star.className = "star-btn";
-      star.textContent = ev.starred ? "★" : "☆";
-      star.title = ev.starred ? "별표 끄기 (보관 기간 후 삭제됨)" : "별표 켜기 (오래 보관)";
-      star.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        try {
-          const r = await fetch(`/api/events/${ev.id}/star`, {
-            method: "PUT", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ starred: !ev.starred }),
-          });
-          if (r.ok) upsertEvent(await r.json());
-        } catch (_) { /* 네트워크 오류면 상태를 바꾸지 않는다 */ }
-      });
-      li.prepend(star);
+  if (sortMode === "size") {
+    for (const ev of list) listEl.appendChild(eventItem(ev));
+  } else {
+    const groups = new Map(); // 최신 시간대부터(list 가 이미 최신순)
+    for (const ev of list) {
+      const k = groupKey(ev.start_ts);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(ev);
     }
-    listEl.appendChild(li);
+    let first = true;
+    for (const [k, evs] of groups) {
+      const holdsSelected = evs.some((e) => e.id === selectedId);
+      const open = openedGroups.has(k) || holdsSelected || (first && !closedGroups.has(k));
+      first = false;
+      const li = document.createElement("li");
+      li.className = "event-group";
+      const det = document.createElement("details");
+      det.open = open;
+      const sum = document.createElement("summary");
+      sum.innerHTML = `<b></b> <small></small>`;
+      sum.querySelector("b").textContent = groupTitle(evs[0].start_ts);
+      sum.querySelector("small").textContent = groupSummary(evs);
+      det.appendChild(sum);
+      const ul = document.createElement("ul");
+      ul.className = "events";
+      for (const ev of evs) ul.appendChild(eventItem(ev));
+      det.appendChild(ul);
+      det.addEventListener("toggle", () => {
+        if (det.open) { openedGroups.add(k); closedGroups.delete(k); }
+        else { closedGroups.add(k); openedGroups.delete(k); }
+      });
+      li.appendChild(det);
+      listEl.appendChild(li);
+    }
   }
+  if (scroller) scroller.scrollTop = scrollTop;
+}
+
+function eventItem(ev) {
+  const li = document.createElement("li");
+  const dur = ev.duration_s.toFixed(1);
+  li.textContent = `${fmtTime(ev.start_ts)}  ${dur}초  최대 ${ev.peak_db.toFixed(1)} dB  (기준선 ${ev.baseline_db.toFixed(1)})`
+    + (ev.ongoing ? "  진행 중" : "") + (ev.truncated ? "  잘림" : "")
+    + (ev.has_clip ? "  ▶ 클립" : ev.audio_deleted ? "  오디오 삭제됨" : "")
+    + labelText(ev);
+  li.className = "clickable" + (ev.id === selectedId ? " selected" : "");
+  li.addEventListener("click", () => { selectedId = ev.id; showClip(ev); renderList(); });
+  if (ev.has_clip || ev.starred) { // 별표: 켜 두면 보관 기간이 지나도 클립이 남는다
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = "star-btn";
+    star.textContent = ev.starred ? "★" : "☆";
+    star.title = ev.starred ? "별표 끄기 (보관 기간 후 삭제됨)" : "별표 켜기 (오래 보관)";
+    star.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try {
+        const r = await fetch(`/api/events/${ev.id}/star`, {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ starred: !ev.starred }),
+        });
+        if (r.ok) upsertEvent(await r.json());
+      } catch (_) { /* 네트워크 오류면 상태를 바꾸지 않는다 */ }
+    });
+    li.prepend(star);
+  }
+  return li;
 }
 
 function upsertEvent(ev) {
+  const prev = events.get(ev.id);
   events.set(ev.id, ev);
-  // 열어 둔 이벤트의 클립이 방금 저장됐으면 패널을 갱신한다
-  if (ev.id === selectedId && ev.has_clip) showClip(ev);
+  // 열어 둔 이벤트의 클립이 방금 저장됐으면 패널을 갱신한다(라벨 갱신 등으로 재생이 끊기지 않게 처음 한 번만)
+  if (ev.id === selectedId && ev.has_clip && !(prev && prev.has_clip)) showClip(ev);
   if (ev.label_status === "done") loadLabelOptions();
   renderList();
   queueDraw();
@@ -208,8 +283,10 @@ export function handleMessage(msg) {
 
 export async function loadEvents() {
   try {
-    const q = labelFilter ? "&label=" + encodeURIComponent(labelFilter) : "";
-    const r = await fetch("/api/events?limit=200" + q);
+    let q = labelFilter ? "&label=" + encodeURIComponent(labelFilter) : "";
+    // 날짜를 고르면 그날 이벤트를 전부, 아니면 최근 200건
+    q += dayRange ? `&limit=10000&since=${dayRange.since}&until=${dayRange.until}` : "&limit=200";
+    const r = await fetch("/api/events?" + q.slice(1));
     if (!r.ok) return;
     for (const ev of await r.json()) events.set(ev.id, ev);
     renderList();
@@ -224,6 +301,15 @@ export function initGraph() {
   if (sel) sel.addEventListener("change", () => { sortMode = sel.value; renderList(); });
   const lf = $("label-filter");
   if (lf) lf.addEventListener("change", () => { labelFilter = lf.value; renderList(); loadEvents(); });
+  const day = $("event-day");
+  if (day) day.addEventListener("change", () => {
+    dayRange = dayRangeOf(day.value);
+    openedGroups.clear(); closedGroups.clear();
+    if (listEl.parentElement) listEl.parentElement.scrollTop = 0;
+    renderList(); loadEvents();
+  });
+  const recent = $("event-recent");
+  if (recent && day) recent.addEventListener("click", () => { day.value = ""; day.dispatchEvent(new Event("change")); });
   loadLabelOptions();
   window.addEventListener("resize", queueDraw);
   renderList();

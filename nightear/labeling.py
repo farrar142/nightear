@@ -5,7 +5,9 @@
 실행하므로 오디오가 밖으로 나가지 않는다. 모델은 `scripts/fetch_models.py` 로 내려받는다(README 참고).
 
 LabelWorker는 클립이 저장되면(ClipRecorder.on_clip_saved) 이벤트를 pending 으로 표시하고 큐에 넣어 비동기로
-분류한다. 성공하면 상위 label_top_k 개를 event_labels 에 저장하고 done, 실패하면 failed (클립은 그대로 남는다).
+분류한다. 클립 전체가 아니라 이벤트 구간(앞뒤 조금 여유)만 분류기에 넘긴다: 클립 앞뒤의 pre/post roll 은 조용해서,
+창별 최댓값을 쓰는 분류기에서는 거의 모든 클립의 1순위가 Silence 가 되기 때문이다. 같은 이유로 소리가 아닌
+라벨(Silence)은 순위에서 뺀다. 성공하면 상위 label_top_k 개를 event_labels 에 저장하고 done, 실패하면 failed (클립은 그대로 남는다).
 상태가 바뀔 때마다 실시간 채널로 {"type":"label","event":{...}} 를 방송한다.
 """
 from __future__ import annotations
@@ -26,6 +28,9 @@ log = logging.getLogger(__name__)
 MODEL_FILE = "yamnet.onnx"
 CLASS_MAP_FILE = "yamnet_class_map.csv"
 RESULT_SIZE = 10  # 분류기가 돌려주는 후보 수 상한(저장은 label_top_k 만큼)
+SEGMENT_MARGIN_S = 0.5  # 이벤트 구간 앞뒤로 더 넣어 분류하는 여유
+MIN_SEGMENT_S = 1.0  # 이보다 짧은 구간은 앞뒤로 넓힌다(YAMNet 한 창 0.975초)
+NON_SOUND_LABELS = frozenset({"Silence"})  # 이벤트는 기준선보다 큰 소리라 이 라벨은 의미가 없다
 
 
 class SoundClassifier(Protocol):
@@ -89,6 +94,24 @@ def read_wav(path: Path) -> tuple[bytes, int]:
         return w.readframes(w.getnframes()), w.getframerate()
 
 
+def event_segment(pcm: bytes, sample_rate: int, event: dict[str, Any]) -> bytes:
+    """클립 PCM 에서 이벤트 구간(앞뒤 SEGMENT_MARGIN_S, 최소 MIN_SEGMENT_S)만 잘라낸다."""
+    clip_start = event.get("clip_start_ts")
+    if clip_start is None:
+        return pcm
+    total = len(pcm) // 2 / sample_rate
+    start = event["start_ts"] - clip_start - SEGMENT_MARGIN_S
+    end = event["end_ts"] - clip_start + SEGMENT_MARGIN_S
+    short = MIN_SEGMENT_S - (end - start)
+    if short > 0:
+        start, end = start - short / 2, end + short / 2
+    if start < 0:  # 클립 밖으로 나간 만큼 반대쪽으로 민다
+        start, end = 0.0, end - start
+    if end > total:
+        start, end = max(0.0, start - (end - total)), total
+    return pcm[int(start * sample_rate) * 2:int(end * sample_rate) * 2]
+
+
 class LabelWorker:
     def __init__(self, settings, store, hub, classifier: SoundClassifier, clips_dir: Path) -> None:
         self._settings = settings
@@ -115,6 +138,13 @@ class LabelWorker:
                 pass
             self._task = None
 
+    async def relabel(self, *, since: float | None = None, until: float | None = None) -> int:
+        """클립이 남아 있는 이벤트를 다시 라벨링 대기열에 넣는다. 넣은 수를 돌려준다."""
+        targets = [e for e in self._store.list(order="asc", since=since, until=until) if e["has_clip"]]
+        for event in targets:
+            await self.enqueue(event)
+        return len(targets)
+
     async def enqueue(self, event: dict[str, Any]) -> None:
         """클립이 저장된 이벤트를 라벨링 대기열에 넣는다."""
         updated = self._store.set_label_status(event["id"], "pending")
@@ -139,9 +169,11 @@ class LabelWorker:
             return
         try:
             pcm, rate = await asyncio.to_thread(read_wav, path)
+            pcm = event_segment(pcm, rate, self._store.get(event_id))
             result = await asyncio.to_thread(self._classifier.classify, pcm, rate)
             top_k = int(self._settings.get("label_top_k"))
-            labels = [(str(name), float(score)) for name, score in result][:top_k]
+            labels = [(str(name), float(score)) for name, score in result
+                      if name not in NON_SOUND_LABELS][:top_k]
             event = self._store.set_labels(event_id, labels)
         except Exception as e:  # 실패해도 이벤트·클립은 남기고 상태만 failed 로 둔다
             log.warning("라벨링 실패(이벤트 %s): %s", event_id, e)
@@ -156,3 +188,9 @@ router = APIRouter(prefix="/api/labels", tags=["labels"])
 def list_labels(request: Request) -> list[dict[str, Any]]:
     """붙은 라벨 목록과 이벤트 수(라벨 필터 선택지)."""
     return request.app.state.events.label_counts()
+
+
+@router.post("/relabel")
+async def relabel(request: Request, since: float | None = None, until: float | None = None) -> dict[str, int]:
+    """클립이 남아 있는 이벤트(start_ts 가 [since, until) 안)를 다시 라벨링한다. 결과는 실시간 채널로 온다."""
+    return {"queued": await request.app.state.label_worker.relabel(since=since, until=until)}

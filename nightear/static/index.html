@@ -24,8 +24,17 @@
     .events li.empty { color: #7f8aa3; }
     .events li.clickable { cursor: pointer; }
     .events li.clickable:hover, .events li.selected { background: #1d2230; }
-    .clip-panel { margin-top: 12px; padding: 12px; background: #1d2230; border: 1px solid #343b50; border-radius: 6px; }
-    .clip-wave { display: block; width: 100%; height: 90px; cursor: pointer; margin-bottom: 8px; }
+    .event-scroll { position: relative; max-height: 55vh; overflow-y: auto; border: 1px solid #262c3d; border-radius: 6px; padding: 0 8px; }
+    .events li.event-group { padding: 0; white-space: normal; }
+    .event-group > details > summary { cursor: pointer; padding: 8px 0; position: sticky; top: 0; background: #12151c; z-index: 1; }
+    .event-group > details > summary small { margin-left: 8px; }
+    .event-group > details > ul { padding-left: 14px; }
+    .clip-panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; padding: 10px max(16px, calc((100vw - 900px) / 2)); background: #1d2230; border-top: 1px solid #343b50; box-shadow: 0 -6px 18px rgba(0,0,0,0.45); }
+    .clip-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+    .clip-head button { padding: 4px 10px; }
+    body.dock-open { padding-bottom: 240px; }
+    input[type=date] { background: #1d2230; color: inherit; border: 1px solid #343b50; border-radius: 6px; padding: 7px 10px; font-size: 14px; }
+    .clip-wave { display: block; width: 100%; height: 70px; cursor: pointer; margin-bottom: 8px; }
     .clip-panel audio { width: 100%; margin-bottom: 8px; }
     .stats-heat { display: block; width: 100%; height: 190px; background: #1d2230; border: 1px solid #343b50; border-radius: 6px; margin-bottom: 6px; }
     .stats-labels li { display: flex; gap: 10px; align-items: center; }
@@ -44,6 +53,7 @@
     <label for="device">입력 장치</label>
     <select id="device"></select>
     <button id="start" type="button">수집 시작</button>
+    <button id="pause" type="button" disabled>일시정지</button>
   </div>
 
   <div class="row">
@@ -69,10 +79,13 @@
     <h2 style="font-size:16px;margin:0">이벤트</h2>
     <select id="label-filter"><option value="">전체 라벨</option></select>
     <select id="event-sort"><option value="time">시간순</option><option value="size">크기순</option></select>
+    <input id="event-day" type="date" title="날짜를 고르면 그날 이벤트만 봅니다">
+    <button id="event-recent" type="button">최근</button>
   </div>
-  <ul id="event-list" class="events"></ul>
+  <div class="event-scroll"><ul id="event-list" class="events"></ul></div>
 
   <div id="clip-panel" class="clip-panel" hidden>
+    <div class="clip-head"><span id="clip-title"></span><button id="clip-close" type="button" title="닫기">✕</button></div>
     <div id="clip-info" class="meter-text"></div>
     <div id="clip-body">
       <canvas id="clip-wave" class="clip-wave"></canvas>
@@ -104,7 +117,7 @@
       <div class="meter-text" id="tl-title"></div>
       <canvas id="tl-canvas" class="graph"></canvas>
       <div class="meter-text"><small>연한 녹색 초당 최대 / 진한 녹색 초당 평균 / 파란 띠 수면 모드 / 회색 띠 수집 공백 / 빨강 점 이벤트(클릭)</small></div>
-      <ul id="tl-events" class="events"></ul>
+      <div class="event-scroll"><ul id="tl-events" class="events"></ul></div>
     </div>
   </section>
   <style>

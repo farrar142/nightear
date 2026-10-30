@@ -11,9 +11,11 @@ class FakeClassifier:
         self.fail = fail
         self.gate = gate  # 설정하면 gate.set() 전까지 분류가 끝나지 않는다(pending 상태 관찰용)
         self.calls: list[tuple[int, int]] = []  # (PCM 바이트 수, 샘플레이트)
+        self.pcms: list[bytes] = []  # 받은 PCM 그대로
 
     def classify(self, pcm: bytes, sample_rate: int):
         self.calls.append((len(pcm), sample_rate))
+        self.pcms.append(pcm)
         if self.gate is not None:
             self.gate.wait(10)
         if self.fail:

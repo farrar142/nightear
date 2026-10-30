@@ -6,6 +6,8 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
+from nightear import labeling
+
 from .support import audio
 from .support.classifier import FakeClassifier
 from .support.clients import ingest, realtime
@@ -58,7 +60,56 @@ def test_클립이_저장되면_비동기로_라벨이_붙고_실시간으로_�
     ev = msg["event"]
     assert ev["label_status"] == "done" and ev["has_clip"] is True
     assert fake.calls and fake.calls[0][1] == 16000  # 클립 오디오(16kHz)가 분류기에 전달됐다
-    assert fake.calls[0][0] == int(ev["clip_duration_s"] * 16000) * 2
+
+
+def test_분류기에는_클립_전체가_아니라_이벤트_구간만_넘어간다(make_app):
+    fake = FakeClassifier()
+    with make_client(make_app, fake) as client, realtime(client) as rt, ingest(client) as src:
+        msgs = feed(src, rt, burst_clip_audio())
+        ev = wait_label(rt, "done", msgs)["event"]
+    [pcm] = fake.pcms
+    seconds = len(pcm) / 2 / 16000
+    assert seconds == pytest.approx(ev["duration_s"] + 2 * labeling.SEGMENT_MARGIN_S, abs=0.11)
+    assert seconds < ev["clip_duration_s"] - 10  # 앞 pre_roll(10초)의 조용한 구간이 빠졌다
+    # 넘어간 구간의 대부분이 버스트(LOUD)다: 잡음 바닥(FLOOR)보다 훨씬 크다
+    assert audio.rms_dbfs(pcm) > LOUD - 6  # 클립 전체(16초 중 1초)였다면 약 LOUD - 12
+
+
+def test_짧은_이벤트도_YAMNet_한_창_이상은_넘긴다(make_app):
+    fake = FakeClassifier()
+    pcm = audio.noise_with_bursts(FLOOR, 36.0, [(15.0, 0.3, LOUD)])
+    with make_client(make_app, fake) as client, realtime(client) as rt, ingest(client) as src:
+        wait_label(rt, "done", feed(src, rt, pcm))
+    assert len(fake.pcms[0]) / 2 / 16000 >= labeling.MIN_SEGMENT_S - 0.01
+
+
+def test_Silence는_라벨_순위에서_빠진다(make_app):
+    fake = FakeClassifier(results=[("Silence", 1.0), ("Snoring", 0.7), ("Speech", 0.5), ("Door", 0.2)])
+    with make_client(make_app, fake) as client, realtime(client) as rt, ingest(client) as src:
+        msgs = feed(src, rt, burst_clip_audio())
+        msg = wait_label(rt, "done", msgs)
+    assert [l["label"] for l in msg["event"]["labels"]] == ["Snoring", "Speech", "Door"]
+
+
+def test_이미_라벨이_붙은_클립을_다시_라벨링한다(make_app):
+    fake = FakeClassifier(results=[("Silence", 1.0), ("Speech", 0.5)])
+    with make_client(make_app, fake) as client, realtime(client) as rt, ingest(client) as src:
+        wait_label(rt, "done", feed(src, rt, burst_clip_audio()))
+        fake.results = [("Snoring", 0.9), ("Breathing", 0.4)]
+        assert client.post("/api/labels/relabel").json() == {"queued": 1}
+        wait_label(rt, "pending")
+        msg = wait_label(rt, "done")
+        assert [l["label"] for l in events(client)[0]["labels"]] == ["Snoring", "Breathing"]
+    assert [l["label"] for l in msg["event"]["labels"]] == ["Snoring", "Breathing"]
+    assert len(fake.pcms) == 2
+
+
+def test_다시_라벨링은_기간을_고를_수_있다(make_app):
+    with make_client(make_app, FakeClassifier()) as client, realtime(client) as rt, ingest(client) as src:
+        wait_label(rt, "done", feed(src, rt, burst_clip_audio()))
+        [ev] = events(client)
+        assert client.post("/api/labels/relabel", params={"since": ev["start_ts"] + 1}).json() == {"queued": 0}
+        assert client.post("/api/labels/relabel", params={"until": ev["start_ts"] + 1}).json() == {"queued": 1}
 
 
 def test_이벤트_목록에_상위_라벨_후보가_보인다(make_app):

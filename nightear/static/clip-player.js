@@ -1,4 +1,5 @@
-// 이벤트 클립 패널: 파형 표시 + 재생 + 다운로드. graph.js 의 이벤트 목록에서 showClip(ev)로 연다.
+// 이벤트 클립 패널: 파형 표시 + 재생 + 다운로드. 화면 아래 고정 도크로 뜬다.
+// graph.js 의 이벤트 목록과 timeline.js 의 밤 이벤트에서 showClip(ev)로 연다.
 
 const $ = (id) => document.getElementById(id);
 let current = null; // 현재 열린 이벤트 id
@@ -53,7 +54,18 @@ function drawWave(ev) {
   }
 }
 
+export function hideClip() {
+  const panel = $("clip-panel");
+  if (!panel) return;
+  if (audioEl) audioEl.pause();
+  current = null;
+  panel.hidden = true;
+  document.body.classList.remove("dock-open");
+}
+
 export async function showClip(ev) {
+  const close = $("clip-close");
+  if (close) close.onclick = hideClip;
   const panel = $("clip-panel");
   if (!panel) return;
   current = ev.id;
@@ -62,6 +74,11 @@ export async function showClip(ev) {
   audioEl = $("clip-audio");
   audioEl.pause();
   panel.hidden = false;
+  document.body.classList.add("dock-open");
+  const title = $("clip-title");
+  if (title) title.textContent = new Date(ev.start_ts * 1000).toLocaleString("ko-KR", { hour12: false })
+    + `  ${ev.duration_s.toFixed(1)}초  최대 ${ev.peak_db.toFixed(1)} dB`
+    + (ev.labels && ev.labels.length ? `  [${ev.labels[0].label}]` : "");
   if (!ev.has_clip) {
     $("clip-body").hidden = true;
     info.textContent = ev.audio_deleted ? "보관 기간이 지나 오디오가 삭제됐습니다."
@@ -72,6 +89,7 @@ export async function showClip(ev) {
   info.textContent = `클립 ${ev.clip_duration_s.toFixed(1)}초`;
   const url = `/api/events/${ev.id}/clip`;
   audioEl.src = url;
+  audioEl.play().catch(() => {}); // 누르자마자 들리도록 바로 재생
   $("clip-download").href = `${url}?download=true`;
   audioEl.ontimeupdate = () => { if (current === ev.id) drawWave(ev); };
   $("clip-wave").onclick = (e) => {
