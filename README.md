@@ -36,6 +36,10 @@ py -m pip install -e ".[ml]"
 py scripts/fetch_models.py      # ./models (NIGHTEAR_MODELS) 에 yamnet.onnx, yamnet_class_map.csv
 ```
 
+분류기에는 클립 전체가 아니라 이벤트 구간(앞뒤 0.5초, 최소 1초)만 넘기고, `Silence` 는 순위에서 뺀다.
+라벨 방식을 바꾼 뒤 이미 붙은 라벨을 다시 매기려면 `POST /api/labels/relabel?since=<ts>&until=<ts>`
+(생략하면 클립이 남은 이벤트 전체)를 부른다.
+
 모델이 없으면 라벨 상태가 failed 가 될 뿐 클립은 그대로 남는다. 실제 모델 스모크 테스트
 (`tests/test_yamnet_smoke.py`)는 모델이 없으면 건너뛴다.
 
