@@ -1,6 +1,8 @@
 // 밤 타임라인 화면: 밤 목록 -> 하룻밤 선택 -> 전체 dB 타임라인(수면 구간·수집 공백·이벤트 마커).
 // 독립 모듈: index.html 의 #timeline 섹션만 건드린다. 주소 #night=YYYY-MM-DD 로 특정 밤을 바로 연다.
 
+import { showClip } from "./clip-player.js";
+
 const DB_MIN = -90;
 const DB_MAX = 0;
 
@@ -67,20 +69,23 @@ function renderEvents() {
     li.id = "tl-event-" + ev.id;
     li.className = "clickable";
     li.textContent = `${fmtTime(ev.start_ts)}  ${ev.duration_s.toFixed(1)}초  최대 ${ev.peak_db.toFixed(1)} dB`
-      + (ev.sleep_mode ? "  (수면 중)" : "");
+      + (ev.sleep_mode ? "  (수면 중)" : "") + (ev.has_clip ? "  ▶ 클립" : "");
     li.addEventListener("click", () => focusEvent(ev.id));
     ul.appendChild(li);
   }
 }
 
-// 마커(또는 목록 항목)를 누르면 해당 이벤트 항목을 강조하고 스크롤한다.
+// 마커(또는 목록 항목)를 누르면 해당 이벤트 항목을 강조하고, 목록 상자 안에서만 스크롤한 뒤 하단 도크에서 재생한다.
 export function focusEvent(id) {
   const li = $("tl-event-" + id);
   if (!li) return;
   selectedId = id;
   document.querySelectorAll("#tl-events li.selected").forEach((e) => e.classList.remove("selected"));
   li.classList.add("selected");
-  li.scrollIntoView({ block: "center", behavior: "smooth" });
+  const box = li.closest(".event-scroll");
+  if (box) box.scrollTo({ top: li.offsetTop - box.clientHeight / 2, behavior: "smooth" });
+  const ev = night.events.find((e) => e.id === id);
+  if (ev) showClip(ev);
   draw();
 }
 

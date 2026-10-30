@@ -202,6 +202,7 @@ async function startCapture(fromGesture = false) {
 
   ingestWanted = true;
   connectIngest();
+  setPaused(false);
   node.port.onmessage = (ev) => {
     if (ingestWs && ingestWs.readyState === WebSocket.OPEN) ingestWs.send(ev.data);
   };
@@ -262,6 +263,21 @@ $("device").addEventListener("change", () => {
   if (stream) startCapture(false);
 });
 $("start").addEventListener("click", () => startCapture(true));
+
+// ---- 일시정지: 마이크와 수집 연결을 끊는다(서버에는 수집 공백으로 남는다). 같은 버튼으로 재개 ----
+let paused = false;
+function setPaused(p) {
+  paused = p;
+  const btn = $("pause");
+  btn.disabled = false;
+  btn.textContent = p ? "재개" : "일시정지";
+}
+$("pause").addEventListener("click", async () => {
+  if (paused) { await startCapture(true); return; }
+  await stopCapture();
+  setPaused(true);
+  setBadge($("ingest-status"), "일시정지", "");
+});
 
 initGraph();
 connectRealtime();
