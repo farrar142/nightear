@@ -11,6 +11,8 @@
 - night_id_for(ts, cfg) -> 그 시각이 속한 밤 id (창 밖이면 None)
 - app.state.nights.detail(night_id) / .list()
 - 대시보드 경로: /#night=<night_id>
+- 자는 동안(asleep.py): 수면 모드 구간 중 라벨 흐름으로 추정한 실제로 잠든 구간. 밤 상세의 "asleep",
+  요약의 asleep_seconds·asleep_event_count, 이벤트의 "asleep" 표시가 이것을 따른다.
 """
 from __future__ import annotations
 
@@ -20,6 +22,8 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
+
+from . import asleep
 
 MAX_SPAN_DAYS = 400  # 아주 긴 공백이 있어도 후보 밤을 이 이상 만들지 않는다
 _ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -87,12 +91,43 @@ class NightService:
                 gaps.append({"start_ts": ov[0], "end_ts": ov[1], "ongoing": g["ongoing"]})
         return sleep, gaps
 
+    def _asleep(self, w0: float, w1: float, sleep: list[dict]) -> tuple[dict[str, Any], list[float]]:
+        """밤 창의 자는 동안 추정과, 창 안 모든 이벤트 시작 시각."""
+        rows = self._s.db.execute(
+            "SELECT e.start_ts AS ts, l.label AS label FROM events e"
+            " LEFT JOIN event_labels l ON l.event_id = e.id AND l.rank = 0"
+            " WHERE e.start_ts >= ? AND e.start_ts < ? ORDER BY e.start_ts", (w0, w1))
+        est = asleep.estimate([(x["start_ts"], x["end_ts"]) for x in sleep],
+                              [(r["ts"], r["label"]) for r in rows if r["label"] is not None])
+        return est, [r["ts"] for r in rows]
+
+    def mark_asleep(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """이벤트마다 "asleep"(자는 동안 시작했는가)을 채운다. 밤 창 밖의 이벤트는 False."""
+        cfg = self._cfg()
+        cache: dict[str, list[dict]] = {}
+        for ev in events:
+            nid = night_id_for(ev["start_ts"], cfg)
+            if nid is None:
+                ev["asleep"] = False
+                continue
+            if nid not in cache:
+                w0, w1 = night_window(nid, cfg)
+                cache[nid] = self._asleep(w0, w1, self._intervals(w0, w1)[0])[0]["intervals"]
+            ev["asleep"] = asleep.contains(cache[nid], ev["start_ts"])
+        return events
+
     def _summary(self, w0: float, w1: float, sleep: list[dict], gaps: list[dict],
                  level_seconds: int, peak_db: float | None, event_count: int) -> dict[str, Any]:
+        est, starts = self._asleep(w0, w1, sleep)
         return {
             "level_seconds": level_seconds,
             "event_count": event_count,
             "sleep_seconds": sum(x["end_ts"] - x["start_ts"] for x in sleep),
+            # 자는 동안(추정): 추정이 안 되면 수면 모드 전체와 같다
+            "asleep_estimated": est["estimated"],
+            "asleep_ts": est["asleep_ts"],
+            "asleep_seconds": sum(x["end_ts"] - x["start_ts"] for x in est["intervals"]),
+            "asleep_event_count": sum(1 for t in starts if asleep.contains(est["intervals"], t)),
             "gap_count": len(gaps),
             "gap_seconds": sum(x["end_ts"] - x["start_ts"] for x in gaps),
             "peak_db": peak_db,
@@ -109,9 +144,12 @@ class NightService:
         level_rows = self._history.range(w0, w1)
         summary = self._summary(w0, w1, sleep, gaps, len(level_rows),
                                 max((r[1] for r in level_rows), default=None), len(events))
+        est, _ = self._asleep(w0, w1, sleep)
+        for ev in events:
+            ev["asleep"] = asleep.contains(est["intervals"], ev["start_ts"])
         return {
             "id": night_id, "start_ts": w0, "end_ts": w1, "summary": summary,
-            "sleep_intervals": sleep, "gaps": gaps, "events": events,
+            "sleep_intervals": sleep, "asleep": est, "gaps": gaps, "events": events,
             "levels": {"columns": ["ts", "max_db", "mean_db"], "step_s": 1,
                        "rows": [list(r) for r in level_rows]},
         }

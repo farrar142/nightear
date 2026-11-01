@@ -22,6 +22,7 @@
     .events { list-style: none; padding: 0; margin: 0; font-variant-numeric: tabular-nums; font-size: 14px; }
     .events li { padding: 6px 0; border-bottom: 1px solid #262c3d; white-space: pre-wrap; }
     .events li.empty { color: #7f8aa3; }
+    .events li.awake { opacity: 0.5; } /* 수면 모드 중이지만 깨어 있던(추정) 이벤트 */
     .events li.clickable { cursor: pointer; }
     .events li.clickable:hover, .events li.selected { background: #1d2230; }
     .event-scroll { position: relative; max-height: 55vh; overflow-y: auto; border: 1px solid #262c3d; border-radius: 6px; padding: 0 8px; }
@@ -99,6 +100,7 @@
     <select id="stats-period">
       <option value="7">최근 7일</option><option value="30" selected>최근 30일</option><option value="0">전체</option>
     </select>
+    <label><input id="stats-asleep" type="checkbox" checked> 자는 동안만</label>
     <button id="stats-refresh" type="button">새로고침</button>
     <small id="stats-total"></small>
   </div>
@@ -116,7 +118,7 @@
     <div id="tl-detail" hidden>
       <div class="meter-text" id="tl-title"></div>
       <canvas id="tl-canvas" class="graph"></canvas>
-      <div class="meter-text"><small>연한 녹색 초당 최대 / 진한 녹색 초당 평균 / 파란 띠 수면 모드 / 회색 띠 수집 공백 / 빨강 점 이벤트(클릭)</small></div>
+      <div class="meter-text"><small>연한 녹색 초당 최대 / 진한 녹색 초당 평균 / 파란 띠 수면 모드(진한 부분: 자는 동안 추정) / 회색 띠 수집 공백 / 빨강 점 이벤트(클릭)</small></div>
       <div class="event-scroll"><ul id="tl-events" class="events"></ul></div>
     </div>
   </section>

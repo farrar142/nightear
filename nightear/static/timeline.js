@@ -19,7 +19,11 @@ const fmtDur = (s) => {
 
 export function summaryText(n) {
   const s = n.summary;
-  return `${n.id}  이벤트 ${s.event_count}건 · 수면 ${fmtDur(s.sleep_seconds)} · 공백 ${s.gap_count}회(${fmtDur(s.gap_seconds)})`;
+  // 자는 동안 = 수면 모드 중 라벨 흐름으로 추정한 실제로 잠든 구간(추정 불가면 수면 모드 전체)
+  const asleep = s.asleep_estimated
+    ? `잠듦 ${fmtTime(s.asleep_ts)} · 자는 동안 ${fmtDur(s.asleep_seconds)}(이벤트 ${s.asleep_event_count}건)`
+    : `잠든 시각 추정 불가`;
+  return `${n.id}  이벤트 ${s.event_count}건 · 수면 모드 ${fmtDur(s.sleep_seconds)} · ${asleep} · 공백 ${s.gap_count}회(${fmtDur(s.gap_seconds)})`;
 }
 
 async function loadNightList() {
@@ -67,9 +71,10 @@ function renderEvents() {
   for (const ev of night.events) {
     const li = document.createElement("li");
     li.id = "tl-event-" + ev.id;
-    li.className = "clickable";
+    li.className = "clickable" + (ev.sleep_mode && !ev.asleep ? " awake" : "");
     li.textContent = `${fmtTime(ev.start_ts)}  ${ev.duration_s.toFixed(1)}초  최대 ${ev.peak_db.toFixed(1)} dB`
-      + (ev.sleep_mode ? "  (수면 중)" : "") + (ev.has_clip ? "  ▶ 클립" : "");
+      + (ev.asleep ? "  (자는 중)" : ev.sleep_mode ? "  (수면 모드·깨어 있음)" : "") + (ev.has_clip ? "  ▶ 클립" : "")
+      + (ev.labels && ev.labels.length ? `  [${ev.labels[0].label}]` : "");
     li.addEventListener("click", () => focusEvent(ev.id));
     ul.appendChild(li);
   }
@@ -108,6 +113,11 @@ function draw() {
   // 수면 모드 구간(파란 띠), 수집 공백(회색 띠)
   ctx.fillStyle = "rgba(106,165,255,0.16)";
   for (const s of night.sleep_intervals) ctx.fillRect(x(s.start_ts), padT, Math.max(1, x(s.end_ts) - x(s.start_ts)), ph);
+  // 자는 동안(추정): 수면 모드 띠 위에 더 진하게 덧칠한다
+  if (night.asleep && night.asleep.estimated) {
+    ctx.fillStyle = "rgba(106,165,255,0.22)";
+    for (const s of night.asleep.intervals) ctx.fillRect(x(s.start_ts), padT, Math.max(1, x(s.end_ts) - x(s.start_ts)), ph);
+  }
   ctx.fillStyle = "rgba(160,160,160,0.35)";
   for (const g of night.gaps) ctx.fillRect(x(g.start_ts), padT, Math.max(1, x(g.end_ts) - x(g.start_ts)), ph);
 

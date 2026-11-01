@@ -50,6 +50,7 @@ def add_gap(client, start_ts, end_ts):
 
 def test_밤이_끝나면_요약이_한_번_발송된다(client, clock):
     configure(client, dashboard_base_url="http://pc.local:8000/")
+    add_sleep(client, at(2025, 1, 15, 23, 0), at(2025, 1, 16, 11, 59))
     add_event(client, at(2025, 1, 16, 1, 0), -30, [("Snoring", 0.9)])
     add_event(client, at(2025, 1, 16, 3, 12), -12.3, [("Door", 0.8)])
     add_event(client, at(2025, 1, 16, 4, 0), -40, [("Snoring", 0.7)])
@@ -60,6 +61,7 @@ def test_밤이_끝나면_요약이_한_번_발송된다(client, clock):
     [text] = notifier(client).sent
     assert "2025-01-15" in text
     assert "3건" in text
+    assert "잠든 시각을 추정하지 못해" in text  # 숨소리가 2건뿐: 수면 모드 전체로 센다
     assert "Snoring 2건" in text and "Door 1건" in text
     assert "03:12" in text  # 가장 큰 소리 시각(로컬 시간대)
     assert "http://pc.local:8000/#night=2025-01-15" in text
@@ -80,6 +82,7 @@ def test_이벤트가_없으면_조용한_밤_요약(client, clock):
 
 def test_수집_공백이_있으면_N분간_기록_없음(client, clock):
     configure(client)
+    add_sleep(client, at(2025, 1, 15, 23, 0), at(2025, 1, 16, 9, 0))
     add_event(client, at(2025, 1, 16, 2, 0), -30)
     add_gap(client, at(2025, 1, 16, 3, 0), at(2025, 1, 16, 3, 25))
     clock.set(datetime(2025, 1, 16, 12, 5, tzinfo=KST))

@@ -232,7 +232,9 @@ function eventItem(ev) {
     + (ev.ongoing ? "  진행 중" : "") + (ev.truncated ? "  잘림" : "")
     + (ev.has_clip ? "  ▶ 클립" : ev.audio_deleted ? "  오디오 삭제됨" : "")
     + labelText(ev);
-  li.className = "clickable" + (ev.id === selectedId ? " selected" : "");
+  // 수면 모드 중이지만 깨어 있던(추정) 이벤트는 흐리게. 실시간으로 막 들어온 이벤트는 asleep 값이 없다.
+  li.className = "clickable" + (ev.id === selectedId ? " selected" : "")
+    + (ev.sleep_mode && ev.asleep === false ? " awake" : "");
   li.addEventListener("click", () => { selectedId = ev.id; showClip(ev); renderList(); });
   if (ev.has_clip || ev.starred) { // 별표: 켜 두면 보관 기간이 지나도 클립이 남는다
     const star = document.createElement("button");

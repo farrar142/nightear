@@ -189,5 +189,6 @@ def list_events(
     until: float | None = None,
     label: list[str] | None = Query(None),
 ) -> list[dict[str, Any]]:
-    return request.app.state.events.list(sort=sort, order=order, limit=limit, since=since, until=until,
-                                         labels=label)
+    events = request.app.state.events.list(sort=sort, order=order, limit=limit, since=since, until=until,
+                                           labels=label)
+    return request.app.state.nights.mark_asleep(events)  # "asleep": 자는 동안(추정) 시작한 이벤트인가
