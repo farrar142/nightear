@@ -135,3 +135,17 @@ def test_전이_콜백이_진입과_해제에_호출된다(client, clock):
         src.send_activity("active", 0)
     assert [t.sleeping for t in seen] == [True, False]
     assert seen[1].start_ts == seen[0].ts
+
+
+def test_브라우저_원시_상태를_함께_보내도_판정은_같고_진단_로그가_남는다(client, clock, caplog):
+    caplog.set_level("INFO", logger="nightear.sleep")
+    now_ms = clock.now().timestamp() * 1000
+    with source(client, idle=True) as src:
+        src.src.ws.send_json({"type": "activity", "state": "idle", "idle_seconds": 25 * 60, "client": {
+            "user_state": "idle", "screen_state": "unlocked", "changed_at": now_ms - 30_000,
+            "tab_input_at": now_ms - 5_000, "sent_at": now_ms, "visibility": "hidden", "focused": False}})
+        src.settle()
+        assert sleep_state(client)["sleeping"] is True
+    [line] = [r.getMessage() for r in caplog.records if r.getMessage().startswith("브라우저 상태")]
+    assert "user=idle screen=unlocked visibility=hidden" in line
+    assert "change=30.0s전" in line and "[탭 입력이 있는데 유휴]" in line
