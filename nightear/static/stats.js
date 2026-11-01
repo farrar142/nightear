@@ -43,16 +43,19 @@ function renderLabels(list, unlabeled) {
 
 export async function loadStats() {
   const days = Number($("stats-period").value);
-  const params = days ? `?since=${Date.now() / 1000 - days * 86400}` : "";
+  const params = new URLSearchParams();
+  if (days) params.set("since", Date.now() / 1000 - days * 86400);
+  if ($("stats-asleep").checked) params.set("asleep", "true"); // 자는 동안(추정)에 시작한 이벤트만
   try {
-    const s = await (await fetch("/api/stats" + params)).json();
-    $("stats-total").textContent = `이벤트 ${s.total}건 (${s.timezone})`;
+    const s = await (await fetch("/api/stats?" + params)).json();
+    $("stats-total").textContent = `이벤트 ${s.total}건${s.asleep ? "(자는 동안)" : ""} (${s.timezone})`;
     heat($("stats-heat"), s.heatmap);
     renderLabels(s.by_label, s.unlabeled);
   } catch (_) { $("stats-total").textContent = "통계를 불러오지 못했습니다."; }
 }
 
 $("stats-period").addEventListener("change", loadStats);
+$("stats-asleep").addEventListener("change", loadStats);
 $("stats-refresh").addEventListener("click", loadStats);
 window.addEventListener("resize", loadStats);
 loadStats();

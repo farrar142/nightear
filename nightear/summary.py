@@ -62,15 +62,20 @@ def _fmt_duration(seconds: float) -> str:
 
 
 def build_message(night: dict[str, Any], cfg: dict[str, Any]) -> str:
-    """밤 상세(NightService.detail) -> 요약 텍스트."""
+    """밤 상세(NightService.detail) -> 요약 텍스트. 이벤트는 자는 동안(추정)에 시작한 것만 센다."""
     tz = ZoneInfo(cfg["timezone"])
-    events = night["events"]
+    events = [e for e in night["events"] if e.get("asleep")]
     summary = night["summary"]
     lines = [f"[nightear] {night['id']} 밤 요약"]
+    if summary.get("asleep_estimated"):
+        lines.append("잠든 시각(추정) " + datetime.fromtimestamp(summary["asleep_ts"], tz).strftime("%H:%M")
+                     + f", 자는 동안 {_fmt_duration(summary['asleep_seconds'])}")
+    elif night["sleep_intervals"]:
+        lines.append("잠든 시각을 추정하지 못해 수면 모드 전체를 자는 동안으로 셌습니다.")
     if not events:
-        lines.append("조용한 밤이었습니다. 감지된 소리 이벤트가 없습니다.")
+        lines.append("조용한 밤이었습니다. 자는 동안 감지된 소리 이벤트가 없습니다.")
     else:
-        lines.append(f"소리 이벤트 {len(events)}건")
+        lines.append(f"자는 동안 소리 이벤트 {len(events)}건")
         counts: dict[str, int] = {}
         unlabeled = 0
         for e in events:
