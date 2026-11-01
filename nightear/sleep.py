@@ -78,6 +78,7 @@ class SleepMode:
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._last_persist = 0.0
+        self._last_trace_key: tuple | None = None
         # 재시작 전에 열린 채 남은 구간은 마지막으로 평가된 시각(last_ts)에서 닫는다.
         self._s.db.execute(
             "UPDATE sleep_sessions SET end_ts = COALESCE(last_ts, start_ts) WHERE end_ts IS NULL")
@@ -103,9 +104,39 @@ class SleepMode:
             secs = 0.0
         if state != self._activity_state:  # 수면 해제가 늦은 원인을 나중에 로그로 확인하려고 남긴다
             log.info("활동 상태 %s -> %s (idle_seconds=%.0f)", self._activity_state, state, secs)
+        self._trace_client(state, msg.get("client"))
         self._activity_state = state
         self._idle_start = None if state == "active" else self._now_ts() - float(secs)
         await self.evaluate()
+
+    def _trace_client(self, state: str, client: Any) -> None:
+        """브라우저 원시 상태(IdleDetector·탭 가시성·탭 입력)를 바뀔 때마다 로그로 남긴다(진단용).
+
+        브라우저와 백엔드는 같은 PC 에서 돌아 시계가 같다. 시각은 수신 시각과의 차(초)로 적는다.
+        """
+        if not isinstance(client, dict):
+            return
+        now_ms = self._now_ts() * 1000.0
+
+        def ago(key: str) -> str:
+            v = client.get(key)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                return "-"
+            return f"{(now_ms - v) / 1000.0:.1f}s"
+
+        raw = tuple(client.get(k) for k in ("user_state", "screen_state", "visibility", "focused"))
+        # 탭 안 입력이 최근(60초 안)인데 IdleDetector 는 아직 유휴라면 브라우저·OS 쪽 지연이다.
+        tab_ago = client.get("tab_input_at")
+        stale = (state != "active" and isinstance(tab_ago, (int, float)) and not isinstance(tab_ago, bool)
+                 and now_ms - tab_ago < 60_000)
+        key = (state, *raw, stale)
+        if key == self._last_trace_key:
+            return
+        self._last_trace_key = key
+        log.info("브라우저 상태 state=%s user=%s screen=%s visibility=%s focused=%s"
+                 " change=%s전 sent=%s전 tab_input=%s전%s",
+                 state, *raw, ago("changed_at"), ago("sent_at"), ago("tab_input_at"),
+                 " [탭 입력이 있는데 유휴]" if stale else "")
 
     # ---- 판정 ----
     def _now_ts(self) -> float:

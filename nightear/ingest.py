@@ -5,7 +5,8 @@
        {"type":"hello","source_id":str,"sample_rate":16000,"channels":1,"idle_detection_supported":bool}
      백엔드는 {"type":"hello_ack","source_id":...} 로 응답하고, 이어 {"type":"role","role":"active|secondary"} 를 보낸다.
   2. 이후 바이너리 프레임: 16kHz 모노 16-bit 리틀엔디언 PCM (길이 자유, 백엔드가 100ms 프레임으로 재조립)
-  3. 텍스트 활동 메시지: {"type":"activity","state":"active|idle|locked","idle_seconds":float}
+  3. 텍스트 활동 메시지: {"type":"activity","state":"active|idle|locked","idle_seconds":float,
+     "client":{...진단용 브라우저 원시 상태, 선택}}
      활성(active) 연결의 hello/활동만 수면 모드의 입력이 된다(secondary는 기록만 해 둔다).
 
 단일 활성 소스 정책

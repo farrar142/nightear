@@ -52,7 +52,17 @@ const idle = {
   state: "active",
   since: Date.now(), // 현재 상태가 시작된 시각(ms)
   timer: null,
+  // 진단용 원시 값: 깬 뒤 수면 해제가 늦는 원인을 백엔드 로그로 가리려고 함께 보낸다.
+  userState: null,
+  screenState: null,
+  changedAt: null, // 마지막 change 이벤트를 받은 브라우저 시각(ms)
+  tabInputAt: null, // 이 탭 안에서 마지막으로 키·마우스 입력이 있었던 시각(ms)
 };
+
+for (const type of ["keydown", "pointerdown", "pointermove", "wheel"]) {
+  window.addEventListener(type, () => { idle.tabInputAt = Date.now(); }, { passive: true, capture: true });
+}
+document.addEventListener("visibilitychange", () => sendActivity());
 
 function idleSeconds() {
   // active면 0, idle/locked면 마지막 입력 이후 경과(상태 전환 시점 - 임계값부터)
@@ -62,7 +72,14 @@ function idleSeconds() {
 
 function sendActivity() {
   if (!idle.granted || !ingestWs || ingestWs.readyState !== WebSocket.OPEN) return;
-  ingestWs.send(JSON.stringify({ type: "activity", state: idle.state, idle_seconds: idleSeconds() }));
+  ingestWs.send(JSON.stringify({
+    type: "activity", state: idle.state, idle_seconds: idleSeconds(),
+    client: {
+      user_state: idle.userState, screen_state: idle.screenState,
+      changed_at: idle.changedAt, tab_input_at: idle.tabInputAt, sent_at: Date.now(),
+      visibility: document.visibilityState, focused: document.hasFocus(),
+    },
+  }));
 }
 
 async function startIdleDetector(requestPermission) {
@@ -78,6 +95,9 @@ async function startIdleDetector(requestPermission) {
     if (!idle.granted) return;
     const detector = new IdleDetector();
     detector.addEventListener("change", () => {
+      idle.userState = detector.userState;
+      idle.screenState = detector.screenState;
+      idle.changedAt = Date.now();
       const next = detector.screenState === "locked" ? "locked" : detector.userState === "idle" ? "idle" : "active";
       if (next !== idle.state) { idle.state = next; idle.since = Date.now(); }
       sendActivity();
